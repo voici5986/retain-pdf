@@ -107,15 +107,30 @@ def test_translation_control_context_scopes_glossary_to_matching_source_text() -
             control_context.GlossaryEntry(source="SCF", target="自洽场", level="preferred"),
             control_context.GlossaryEntry(source="DFTB", target="密度泛函紧束缚", level="preferred"),
         ],
+        abbreviation_entries=[
+            control_context.AbbreviationEntry(source="SCF", expansion="self-consistent field", strategy="keep"),
+            control_context.AbbreviationEntry(source="DFTB", expansion="density-functional tight-binding", strategy="keep"),
+        ],
     )
 
     scoped = context.scoped_to_source_texts(["The SCF procedure uses Hartree-Fock orbitals."])
 
     assert [entry.source for entry in scoped.glossary_entries] == ["Hartree-Fock", "SCF"]
+    assert [entry.source for entry in scoped.abbreviation_entries] == ["SCF"]
     assert "Hartree-Fock -> Hartree-Fock" not in scoped.merged_guidance
     assert "SCF -> 自洽场" in scoped.merged_guidance
+    assert "SCF: strategy=keep" in scoped.merged_guidance
     assert "DFTB" not in scoped.merged_guidance
     assert "SCF -> 自洽场" in scoped.cache_guidance
+
+    summary = context.term_scope_summary_for_source_texts(["The SCF procedure uses Hartree-Fock orbitals."])
+    assert summary["source_text_count"] == 1
+    assert summary["glossary_total_count"] == 3
+    assert summary["glossary_matched_count"] == 2
+    assert summary["glossary_sources"] == ["Hartree-Fock", "SCF"]
+    assert summary["abbreviation_total_count"] == 2
+    assert summary["abbreviation_matched_count"] == 1
+    assert summary["abbreviation_sources"] == ["SCF"]
 
 
 def test_build_translation_context_from_policy_uses_policy_guidance() -> None:

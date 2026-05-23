@@ -9,11 +9,15 @@ import { getMockJobId } from "./mock.js";
 import {
   fetchJobArtifactsManifest,
   fetchJobPayload,
-  fetchProtected,
+} from "./api/jobs.js";
+import { fetchProtected } from "./api/http.js";
+import {
   fetchReaderMetadata,
   fetchReaderRegions,
+} from "./api/reader.js";
+import {
   fetchTranslationItem,
-} from "./network.js";
+} from "./api/translation-debug.js";
 import {
   bindReaderRegionHover,
   bindPrimaryViewer,

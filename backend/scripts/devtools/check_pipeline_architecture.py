@@ -366,6 +366,7 @@ ENTRYPOINT_IMPORT_ALLOWLIST: dict[Path, tuple[str, ...]] = {
     Path("validate_document_schema.py"): ("from services.document_schema import",),
 }
 DEVTOOLS_TRANSLATION_INTERNAL_IMPORT_ALLOWLIST = {
+    Path("inspect_translation_repair_candidates.py"),
     Path("job_debug_runner.py"),
     Path("replay_translation_item.py"),
     Path("run_golden_flow.py"),

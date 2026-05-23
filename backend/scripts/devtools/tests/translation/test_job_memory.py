@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import sys
 from pathlib import Path
 
@@ -75,6 +76,33 @@ def test_job_memory_store_persists_json(tmp_path) -> None:
 
     assert store.update_from_batch(batch, translated) >= 1
     assert "SCF => 自洽场" in store.summary()
+
+
+def test_job_memory_store_allows_concurrent_writers_to_same_path(tmp_path) -> None:
+    path = tmp_path / "translated" / "job-memory.json"
+
+    def _write(index: int) -> int:
+        store = JobMemoryStore(path)
+        batch = [
+            {
+                "item_id": f"p001-b{index:03d}",
+                "source_text": f"Self-consistent field (SCF) iteration {index}.",
+                "protected_source_text": f"Self-consistent field (SCF) iteration {index}.",
+            }
+        ]
+        translated = {
+            f"p001-b{index:03d}": {
+                "translated_text": f"自洽场（SCF）迭代 {index}。",
+            }
+        }
+        return store.update_from_batch(batch, translated)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        changed = list(executor.map(_write, range(24)))
+
+    assert sum(changed) >= 1
+    assert "SCF => 自洽场" in JobMemoryStore(path).summary()
+    assert not list(path.parent.glob("job-memory.json.tmp-*"))
 
 
 def test_job_memory_prompt_summary_filters_sentence_fragments(tmp_path) -> None:

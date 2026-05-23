@@ -9,6 +9,7 @@ from services.translation.services.agents.reviewer import TranslationReviewResul
 from services.translation.services.agents.repair import RepairAgent
 from services.translation.services.agents.repair import TranslationRepairRequest
 from services.translation.services.agents.repair import TranslationRepairResult
+from services.translation.services.agents.runtime import TranslationAgentRuntime
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -71,6 +72,29 @@ class TranslationAgentCoordinator:
     def parse_repair_result(self, *, item_id: str, content: str) -> TranslationRepairResult:
         repair_agent = self.repair_agent or RepairAgent()
         return repair_agent.parse_result(item_id=item_id, content=content)
+
+    def run_repair(
+        self,
+        request: TranslationRepairRequest,
+        *,
+        runtime: TranslationAgentRuntime,
+        model: str = "",
+        base_url: str = "",
+        timeout_s: int = 70,
+    ) -> TranslationRepairResult:
+        task = self.build_repair_task(
+            request,
+            model=model,
+            base_url=base_url,
+            timeout_s=timeout_s,
+        )
+        result = runtime.execute_task(task)
+        if not result.success:
+            raise RuntimeError(result.error or f"agent task failed: {task.task_id}")
+        return self.parse_repair_result(
+            item_id=str(task.metadata.get("item_id", "") or ""),
+            content=result.content,
+        )
 
 
 __all__ = [

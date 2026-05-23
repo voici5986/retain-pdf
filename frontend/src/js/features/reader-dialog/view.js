@@ -83,6 +83,10 @@ export function setReaderToolbarButtonState(id, enabled, url = "") {
 }
 
 export function getReaderToolbarButtonUrl(id) {
+  const component = readerDialogComponent();
+  if (component?.getToolbarButtonUrl) {
+    return component.getToolbarButtonUrl(id);
+  }
   return `${$(id)?.dataset?.url || ""}`.trim();
 }
 
@@ -164,6 +168,10 @@ export function getReaderLinkOpenState(input) {
 }
 
 export function setReaderButtonBusy(id, busy, label = "生成中…") {
+  const component = readerDialogComponent();
+  if (component?.setButtonBusy) {
+    return component.setButtonBusy(id, busy, label);
+  }
   const button = $(id);
   if (!button) {
     return "";
@@ -182,6 +190,11 @@ export function setReaderButtonBusy(id, busy, label = "生成中…") {
 }
 
 export function restoreReaderButton(id, markup) {
+  const component = readerDialogComponent();
+  if (component?.restoreButton) {
+    component.restoreButton(id, markup);
+    return;
+  }
   const button = $(id);
   if (button && typeof markup === "string") {
     button.innerHTML = markup;

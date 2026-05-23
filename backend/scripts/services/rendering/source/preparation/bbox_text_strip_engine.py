@@ -4,8 +4,7 @@ import fitz
 import pikepdf
 from pikepdf import Name
 
-from services.rendering.source.preparation.bbox_text_strip_hit_test import inside_any_rect
-from services.rendering.source.preparation.bbox_text_strip_hit_test import intersects_any_rect
+from services.rendering.source.preparation.bbox_text_strip_hit_test import RectIndex
 from services.rendering.source.preparation.bbox_text_strip_hit_test import is_protected_text_op
 from services.rendering.source.preparation.bbox_text_strip_pdf_math import IDENTITY_MATRIX
 from services.rendering.source.preparation.bbox_text_strip_pdf_math import PdfMatrix
@@ -16,9 +15,11 @@ from services.rendering.source.preparation.bbox_text_strip_pdf_math import mul_m
 from services.rendering.source.preparation.bbox_text_strip_pdf_math import to_float
 from services.rendering.source.preparation.bbox_text_strip_text_ops import TEXT_DEFAULT_RENDER_MODE
 from services.rendering.source.preparation.bbox_text_strip_text_ops import TEXT_SHOW_OPERATORS
-from services.rendering.source.preparation.bbox_text_strip_text_ops import estimated_text_rect
+from services.rendering.source.preparation.bbox_text_strip_text_ops import TextOperandMetrics
+from services.rendering.source.preparation.bbox_text_strip_text_ops import TextState
+from services.rendering.source.preparation.bbox_text_strip_text_ops import estimated_user_text_geometry
 from services.rendering.source.preparation.bbox_text_strip_text_ops import text_advance_tx
-from services.rendering.source.preparation.bbox_text_strip_text_ops import text_operand_length
+from services.rendering.source.preparation.bbox_text_strip_text_ops import text_operand_metrics
 
 
 def strip_bbox_text_from_page(
@@ -51,6 +52,8 @@ def strip_bbox_text_from_stream(
 
     output: list[tuple] = []
     protected_rects = protected_rects or []
+    strip_index = RectIndex.build(rects)
+    protected_index = RectIndex.build(protected_rects)
     removed = 0
     forms_changed = 0
     ctm: PdfMatrix = initial_ctm
@@ -58,8 +61,8 @@ def strip_bbox_text_from_stream(
     text_matrix: PdfMatrix = IDENTITY_MATRIX
     line_matrix: PdfMatrix = IDENTITY_MATRIX
     leading = 0.0
-    text_render_mode = TEXT_DEFAULT_RENDER_MODE
-    render_mode_stack: list[int] = []
+    text_state = TextState(render_mode=TEXT_DEFAULT_RENDER_MODE)
+    text_state_stack: list[TextState] = []
 
     xobjects = _xobject_dict(stream_obj)
 
@@ -69,20 +72,39 @@ def strip_bbox_text_from_stream(
         line_matrix = mul_matrix(line_matrix, move)
         text_matrix = line_matrix
 
-    def advance_text(operands: object) -> None:
+    def advance_text(
+        operands: object,
+        *,
+        text_metrics: TextOperandMetrics | None = None,
+    ) -> None:
         nonlocal text_matrix
-        text_matrix = mul_matrix(text_matrix, (1, 0, 0, 1, text_advance_tx(text_matrix, operands), 0))
+        text_matrix = mul_matrix(
+            text_matrix,
+            (
+                1,
+                0,
+                0,
+                1,
+                text_advance_tx(
+                    text_matrix,
+                    operands,
+                    text_metrics=text_metrics,
+                    text_state=text_state,
+                ),
+                0,
+            ),
+        )
 
     for operands, operator in instructions:
         op = str(operator)
         if op == "q":
             ctm_stack.append(ctm)
-            render_mode_stack.append(text_render_mode)
+            text_state_stack.append(text_state.copy())
             output.append((operands, operator))
             continue
         if op == "Q":
             ctm = ctm_stack.pop() if ctm_stack else IDENTITY_MATRIX
-            text_render_mode = render_mode_stack.pop() if render_mode_stack else TEXT_DEFAULT_RENDER_MODE
+            text_state = text_state_stack.pop() if text_state_stack else TextState(render_mode=TEXT_DEFAULT_RENDER_MODE)
             output.append((operands, operator))
             continue
         if op == "cm":
@@ -147,8 +169,28 @@ def strip_bbox_text_from_stream(
             leading = to_float(operands[0])
             output.append((operands, operator))
             continue
+        if op == "Tf" and len(operands) >= 2:
+            text_state.set_font_size(to_float(operands[1], text_state.font_size))
+            output.append((operands, operator))
+            continue
+        if op == "Tc" and operands:
+            text_state.set_char_spacing(to_float(operands[0], text_state.char_spacing))
+            output.append((operands, operator))
+            continue
+        if op == "Tw" and operands:
+            text_state.set_word_spacing(to_float(operands[0], text_state.word_spacing))
+            output.append((operands, operator))
+            continue
+        if op == "Tz" and operands:
+            text_state.set_horizontal_scaling(to_float(operands[0], text_state.horizontal_scaling * 100.0))
+            output.append((operands, operator))
+            continue
+        if op == "Ts" and operands:
+            text_state.set_rise(to_float(operands[0], text_state.rise))
+            output.append((operands, operator))
+            continue
         if op == "Tr" and operands:
-            text_render_mode = int(to_float(operands[0], TEXT_DEFAULT_RENDER_MODE))
+            text_state.set_render_mode(int(to_float(operands[0], TEXT_DEFAULT_RENDER_MODE)))
             output.append((operands, operator))
             continue
         if op == "T*":
@@ -156,21 +198,29 @@ def strip_bbox_text_from_stream(
             output.append((operands, operator))
             continue
         if op in {"'", '"'}:
+            if op == '"' and len(operands) >= 3:
+                text_state.set_word_spacing(to_float(operands[0], text_state.word_spacing))
+                text_state.set_char_spacing(to_float(operands[1], text_state.char_spacing))
             move_text(0, -leading)
 
         if op in TEXT_SHOW_OPERATORS:
-            user_matrix = mul_matrix(ctm, text_matrix)
-            user_point = matrix_point(user_matrix)
-            text_rect = estimated_text_rect(user_matrix, text_length=text_operand_length(operands))
-            should_remove = (
-                inside_any_rect(user_point[0], user_point[1], rects)
-                or intersects_any_rect(text_rect, rects)
+            text_metrics = text_operand_metrics(operands)
+            user_point, text_rect = estimated_user_text_geometry(
+                ctm,
+                text_matrix,
+                text_state,
+                text_length=text_metrics[0],
+            )
+            should_remove = strip_index.contains_point_or_intersects(
+                user_point[0],
+                user_point[1],
+                text_rect,
             ) and not is_protected_text_op(
                 user_point=user_point,
                 text_rect=text_rect,
-                protected_rects=protected_rects,
+                protected_index=protected_index,
             )
-            advance_text(operands)
+            advance_text(operands, text_metrics=text_metrics)
             if should_remove:
                 removed += 1
                 continue

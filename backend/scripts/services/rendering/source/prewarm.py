@@ -18,8 +18,10 @@ from services.rendering.source.render_source import build_render_source_pdf
 from services.rendering.source.preparation.bbox_text_strip_candidates import build_bbox_text_strip_candidates
 from services.rendering.source.preparation.bbox_text_strip_types import BBoxTextStripCandidates
 from services.rendering.layout.payload.block_seed_metrics import collect_page_seed_metrics
-from services.rendering.layout.payload.prepare import prepare_render_payloads_by_page
+from services.rendering.layout.payload.first_line_indent import detect_first_line_indent_pt_with_displaylist
+from services.rendering.layout.payload.first_line_indent import is_first_line_indent_candidate
 from services.rendering.layout.payload.render_item import get_render_first_line_indent_pt
+from services.rendering.layout.payload.render_item import seed_render_fields
 from services.rendering.policy import apply_render_pages_policy_fields
 from services.translation.public import item_block_kind
 
@@ -331,6 +333,7 @@ def _run_render_source_prewarm(spec: RenderPrewarmSpec, manifest_path: Path) -> 
             translated_pages=spec.translated_pages,
             manifest_path=manifest_path,
             source_cleanup_strategy=spec.source_cleanup_strategy,
+            bbox_text_strip_candidates=prepared.bbox_text_strip_candidates,
         )
         manifest = _build_manifest(
             manifest_path=manifest_path,
@@ -384,37 +387,43 @@ def _build_payload_prewarm(
     translated_pages: dict[int, list[dict]],
     manifest_path: Path,
     source_cleanup_strategy: str = "pikepdf_text_strip",
+    bbox_text_strip_candidates: BBoxTextStripCandidates | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    prepared_pages = prepare_render_payloads_by_page(translated_pages, source_pdf_path=source_pdf_path)
+    prepared_pages = _seed_pages_for_payload_prewarm(translated_pages)
     first_line_indent_by_item_id: dict[str, float] = {}
     effective_inner_bbox_by_item_id: dict[str, list[float]] = {}
-    for items in prepared_pages.values():
-        for item in items:
-            item_id = str(item.get("item_id", "") or "")
-            indent_pt = get_render_first_line_indent_pt(item)
-            if item_id and indent_pt is not None and indent_pt > 0:
-                first_line_indent_by_item_id[item_id] = round(indent_pt, 2)
     page_widths = _page_widths_by_index(source_pdf_path)
-    for page_idx, items in prepared_pages.items():
-        page_width = page_widths.get(page_idx)
-        try:
-            metrics = collect_page_seed_metrics(items, page_width=page_width)
-        except Exception as exc:
-            print(f"render payload prewarm: geometry build failed page={page_idx + 1} {type(exc).__name__}: {exc}", flush=True)
-            continue
-        for index, bbox in metrics.effective_inner_bboxes.items():
-            if index < 0 or index >= len(items):
+    with fitz.open(source_pdf_path) as source_doc:
+        for page_idx, items in prepared_pages.items():
+            page_width = page_widths.get(page_idx)
+            try:
+                metrics = collect_page_seed_metrics(items, page_width=page_width)
+            except Exception as exc:
+                print(f"render payload prewarm: geometry build failed page={page_idx + 1} {type(exc).__name__}: {exc}", flush=True)
                 continue
-            item_id = str(items[index].get("item_id", "") or "")
-            if item_id:
-                effective_inner_bbox_by_item_id[item_id] = [round(float(value), 3) for value in bbox]
+            for index, bbox in metrics.effective_inner_bboxes.items():
+                if index < 0 or index >= len(items):
+                    continue
+                item_id = str(items[index].get("item_id", "") or "")
+                if item_id:
+                    effective_inner_bbox_by_item_id[item_id] = [round(float(value), 3) for value in bbox]
+            _collect_first_line_indent_lookup(
+                source_doc=source_doc,
+                page_idx=page_idx,
+                items=items,
+                metrics=metrics,
+                sink=first_line_indent_by_item_id,
+            )
     if layout.use_bbox_text_strip_cleanup(source_cleanup_strategy):
         try:
-            bbox_candidates = build_bbox_text_strip_candidates(
-                source_pdf_path=source_pdf_path,
-                translated_pages=translated_pages,
-                skip_formula_pages=False,
+            bbox_candidates = (
+                bbox_text_strip_candidates
+                or build_bbox_text_strip_candidates(
+                    source_pdf_path=source_pdf_path,
+                    translated_pages=translated_pages,
+                    skip_formula_pages=False,
+                )
             )
             bbox_payload = _bbox_candidates_to_manifest(bbox_candidates)
         except Exception as exc:
@@ -435,6 +444,61 @@ def _build_payload_prewarm(
         "effective_inner_bbox_by_item_id": effective_inner_bbox_by_item_id,
         "bbox_text_strip_candidates": bbox_payload,
     }
+
+
+def _seed_pages_for_payload_prewarm(translated_pages: dict[int, list[dict]]) -> dict[int, list[dict]]:
+    seeded: dict[int, list[dict]] = {}
+    for page_idx, items in translated_pages.items():
+        seeded_items: list[dict] = []
+        for item in items:
+            clone = dict(item)
+            seed_render_fields(clone)
+            seeded_items.append(clone)
+        seeded[page_idx] = seeded_items
+    return seeded
+
+
+def _collect_first_line_indent_lookup(
+    *,
+    source_doc: fitz.Document,
+    page_idx: int,
+    items: list[dict],
+    metrics,
+    sink: dict[str, float],
+) -> None:
+    if page_idx < 0 or page_idx >= len(source_doc):
+        return
+    candidates: list[tuple[dict, float]] = []
+    for index, item in enumerate(items):
+        item_id = str(item.get("item_id", "") or "")
+        if not item_id:
+            continue
+        existing_indent = get_render_first_line_indent_pt(item)
+        if existing_indent > 0:
+            sink[item_id] = round(existing_indent, 2)
+            continue
+        base = metrics.base_metrics.get(index)
+        if base is None:
+            continue
+        font_size_pt, _leading_em = base
+        if not is_first_line_indent_candidate(item, page_text_width_med=metrics.page_text_width_med):
+            continue
+        candidates.append((item, font_size_pt))
+    if not candidates:
+        return
+    displaylist = source_doc[page_idx].get_displaylist()
+    for item, font_size_pt in candidates:
+        item_id = str(item.get("item_id", "") or "")
+        indent_pt = detect_first_line_indent_pt_with_displaylist(
+            source_doc,
+            displaylist,
+            item,
+            page_idx=page_idx,
+            font_size_pt=font_size_pt,
+            page_text_width_med=metrics.page_text_width_med,
+        )
+        if indent_pt > 0:
+            sink[item_id] = round(indent_pt, 2)
 
 
 def _page_widths_by_index(source_pdf_path: Path) -> dict[int, float]:

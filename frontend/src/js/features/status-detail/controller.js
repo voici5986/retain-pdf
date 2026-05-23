@@ -1,24 +1,9 @@
 import { $ } from "../../dom.js";
 import { buildFrontendPageUrl } from "../../config.js";
-import { resolveJobActions } from "../../job.js";
+import { normalizeJobPayload } from "../../job.js";
+import { buildStatusDetailSnapshot } from "../../status-detail-presentation.js";
 import {
-  boolLabel,
-  degradationReasonOf,
-  diagnosticsOf,
-  errorTypesOf,
-  escapeHtml,
-  fallbackToOf,
-  finalStatusClass,
-  finalStatusLabel,
-  finalStatusOf,
-  firstNonEmptyText,
-  normalizeRoutePath,
-  pageNumberOf,
-  previewText,
-  renderField,
   renderTextBlock,
-  routePathOf,
-  summarizeTranslationFilter,
 } from "./formatters.js";
 import {
   activateDetailTabView,
@@ -26,35 +11,40 @@ import {
   dialogComponent,
   openStatusDetailDialogView,
   readTranslationFilterQuery,
-  setRerunButtonDisabled,
 } from "./view.js";
+import {
+  rerunCurrentJob as rerunCurrentJobAction,
+  syncRerunAction as syncRerunActionState,
+} from "./resume-actions.js";
+import {
+  createTranslationState,
+  renderTranslationEmpty,
+  renderTranslationItemDetail as renderTranslationItemDetailState,
+  renderTranslationItems as renderTranslationItemsState,
+  renderTranslationReplay as renderTranslationReplayState,
+  renderTranslationSummary as renderTranslationSummaryState,
+  resetTranslationState as resetTranslationStateData,
+} from "./translation-state.js";
 
 export function mountStatusDetailFeature({
   state,
   apiPrefix,
+  fetchJobPayload,
+  fetchJobEvents,
+  fetchJobDiagnostics,
+  fetchResumePlan,
   fetchTranslationDiagnostics,
   fetchTranslationItems,
   fetchTranslationItem,
   replayTranslationItem,
   rerunJob,
+  renderJob,
   startPolling,
   setText,
 } = {}) {
-  const translationState = {
-    jobId: "",
-    loaded: false,
-    summary: null,
-    query: {
-      finalStatus: "kept_origin",
-      q: "",
-      limit: 20,
-      offset: 0,
-    },
-    list: [],
-    total: 0,
-    selectedItemId: "",
-    selectedItem: null,
-    replay: null,
+  const translationState = createTranslationState();
+  const detailState = {
+    loadingPromise: null,
   };
 
   function buildDetailPageUrl(jobId) {
@@ -71,254 +61,103 @@ export function mountStatusDetailFeature({
     return `${state?.currentJobId || ""}`.trim();
   }
 
-  function firstJobIdFromPayload(payload) {
-    return firstNonEmptyText(
-      payload?.job_id,
-      payload?.data?.job_id,
-      payload?.job?.job_id,
-      payload?.job?.id,
-      payload?.id,
-    );
-  }
-
   function syncRerunAction(statusText = "") {
-    const job = state?.currentJobSnapshot || null;
-    const actions = job ? resolveJobActions(job) : {};
-    const enabled = Boolean(actions.rerunEnabled && actions.rerun);
-    dialogComponent()?.setRerunAction?.({
-      enabled,
-      status: statusText || (enabled
-        ? "后端支持从当前任务产物创建恢复任务。"
-        : "当前任务暂不可从断点恢复。"),
-    });
-    return actions.rerun || "";
+    return syncRerunActionState({ state, statusText });
   }
 
   async function rerunCurrentJob() {
-    const actionUrl = syncRerunAction("正在提交恢复任务...");
-    setRerunButtonDisabled(true);
-    if (!actionUrl) {
-      syncRerunAction("当前任务暂不可从断点恢复。");
-      return;
-    }
-    try {
-      const payload = await rerunJob(actionUrl);
-      const nextJobId = firstJobIdFromPayload(payload);
-      if (!nextJobId) {
-        syncRerunAction("恢复任务已提交，但响应中没有 job_id。");
-        return;
-      }
-      dialogComponent()?.close?.();
-      setText?.("error-box", `已创建恢复任务 ${nextJobId}，开始轮询。`);
-      startPolling?.(nextJobId);
-    } catch (error) {
-      syncRerunAction(error.message || String(error));
-    }
+    await rerunCurrentJobAction({
+      state,
+      rerunJob,
+      setText,
+      startPolling,
+    });
   }
 
   function activateDetailTab(name = "overview") {
     activateDetailTabView(name);
     if (name === "translation") {
       void ensureTranslationData();
+      return;
     }
+    void ensureOverviewData();
   }
 
   function openStatusDetailDialog(tabName = "overview") {
     openStatusDetailDialogView(tabName);
     if (tabName === "translation") {
       void ensureTranslationData();
+      return;
     }
+    void ensureOverviewData();
   }
 
-  function resetTranslationState(jobId = "") {
-    translationState.jobId = jobId;
-    translationState.loaded = false;
-    translationState.summary = null;
-    translationState.list = [];
-    translationState.total = 0;
-    translationState.selectedItemId = "";
-    translationState.selectedItem = null;
-    translationState.replay = null;
+  function renderOverviewSnapshot(job, eventsPayload) {
+    const snapshot = buildStatusDetailSnapshot(job, eventsPayload);
+    dialogComponent()?.renderSnapshot?.(snapshot);
+    syncRerunAction();
   }
 
-  function renderTranslationEmpty(message) {
-    const component = dialogComponent();
-    component?.renderTranslationSummary({
-      hidden: true,
-      emptyText: message,
-    });
-    component?.renderTranslationItems({
-      loading: false,
-      hasItems: false,
-      emptyText: message,
-      meta: "-",
-    });
-    component?.renderTranslationItemDetail({
-      loading: false,
-      hasItem: false,
-      emptyText: "请选择左侧 item",
-      meta: "-",
-      replayEnabled: false,
-    });
-    component?.renderTranslationReplay({
-      hasResult: false,
-      status: "-",
-    });
+  async function ensureOverviewData({ force = false } = {}) {
+    const jobId = getCurrentJobId();
+    if (!jobId) {
+      return;
+    }
+    if (detailState.loadingPromise && !force) {
+      await detailState.loadingPromise;
+      return;
+    }
+    const previousJob = state.currentJobSnapshot || { job_id: jobId };
+    const previousEvents = state.currentJobEventsJobId === jobId ? state.currentJobEvents : null;
+    renderOverviewSnapshot(previousJob, previousEvents);
+    detailState.loadingPromise = (async () => {
+      try {
+        const [payload, eventsPayload, diagnosticsPayload, resumePlan] = await Promise.all([
+          fetchJobPayload ? fetchJobPayload(jobId, apiPrefix) : Promise.resolve(previousJob),
+          fetchJobEvents ? fetchJobEvents(jobId, apiPrefix, 200, 0).catch(() => previousEvents) : Promise.resolve(previousEvents),
+          fetchJobDiagnostics ? fetchJobDiagnostics(jobId, apiPrefix).catch(() => null) : Promise.resolve(null),
+          fetchResumePlan ? fetchResumePlan(jobId, apiPrefix).catch(() => null) : Promise.resolve(null),
+        ]);
+        const job = {
+          ...normalizeJobPayload(payload),
+          diagnostics: diagnosticsPayload || undefined,
+        };
+        state.currentJobSnapshot = job;
+        state.currentJobId = job.job_id || jobId;
+        state.currentJobDiagnostics = diagnosticsPayload;
+        state.currentJobDiagnosticsJobId = jobId;
+        state.currentJobResumePlan = resumePlan;
+        state.currentJobResumePlanJobId = jobId;
+        if (eventsPayload) {
+          state.currentJobEvents = eventsPayload;
+          state.currentJobEventsJobId = jobId;
+          state.currentJobEventsFetchedAt = Date.now();
+        }
+        renderJob?.(job, eventsPayload || previousEvents, state.currentJobManifest, state.currentJobStageActions);
+        renderOverviewSnapshot(job, eventsPayload || previousEvents);
+      } catch (error) {
+        setText?.("error-box", error.message || String(error));
+      } finally {
+        detailState.loadingPromise = null;
+      }
+    })();
+    await detailState.loadingPromise;
   }
 
   function renderTranslationSummary() {
-    const summary = translationState.summary?.summary || {};
-    dialogComponent()?.renderTranslationSummary({
-      counts: summary.counts || {},
-      finalStatusCounts: summary.final_status_counts || {},
-      providerFamily: `${summary.provider_family || ""}`.trim(),
-      summaryScopeText: "当前 job 全量统计",
-      filterText: summarizeTranslationFilter(translationState.query),
-      hidden: false,
-    });
+    renderTranslationSummaryState(translationState);
   }
 
   function renderTranslationItems({ loading = false, emptyText = "没有匹配的翻译 item" } = {}) {
-    const component = dialogComponent();
-    const list = translationState.list || [];
-    const offset = Number(translationState.query.offset || 0);
-    const limit = Number(translationState.query.limit || 20);
-    const total = Number(translationState.total || 0);
-    const start = total > 0 ? offset + 1 : 0;
-    const end = total > 0 ? Math.min(offset + list.length, total) : 0;
-    const totalPages = total > 0 ? Math.ceil(total / Math.max(limit, 1)) : 0;
-    const currentPage = total > 0 ? Math.floor(offset / Math.max(limit, 1)) + 1 : 0;
-    const meta = loading
-      ? "读取中..."
-      : `共 ${total} 条，本页 ${list.length} 条，offset ${offset}，limit ${limit}`;
-    const pageLabel = loading
-      ? "读取中..."
-      : total > 0
-        ? `第 ${currentPage} / ${totalPages} 页`
-        : "第 0 / 0 页";
-    const markup = list.map((item) => {
-      const active = item.item_id === translationState.selectedItemId;
-      const routePath = normalizeRoutePath(routePathOf(item));
-      const errorTypes = errorTypesOf(item);
-      const errorLabel = errorTypes.length ? errorTypes.join(", ") : "-";
-      const degradationReason = degradationReasonOf(item) || "-";
-      const finalStatus = finalStatusOf(item);
-      return `
-        <button
-          type="button"
-          class="translation-item-card${active ? " is-active" : ""}"
-          data-translation-item-id="${escapeHtml(item.item_id)}"
-        >
-          <div class="translation-item-card-top">
-            <span class="translation-item-id mono">${escapeHtml(item.item_id || "-")}</span>
-            <span class="translation-item-status ${finalStatusClass(finalStatus)}">${escapeHtml(finalStatusLabel(finalStatus))}</span>
-          </div>
-          <div class="translation-item-card-meta">
-            <span class="translation-item-chip">第 ${escapeHtml(pageNumberOf(item))} 页</span>
-            <span class="translation-item-chip">${escapeHtml(item.block_type || "-")}</span>
-            <span class="translation-item-chip">${escapeHtml(item.classification_label || "-")}</span>
-          </div>
-          <div class="translation-item-card-route"><strong>route</strong> ${escapeHtml(routePath || "-")}</div>
-          <div class="translation-item-card-preview">${escapeHtml(previewText(item.source_preview || item.source_text || ""))}</div>
-          <div class="translation-item-card-footer">
-            <span><strong>fallback</strong> ${escapeHtml(fallbackToOf(item) || "-")}</span>
-            <span><strong>error</strong> ${escapeHtml(errorLabel)}</span>
-          </div>
-          <div class="translation-item-card-route"><strong>degradation</strong> ${escapeHtml(degradationReason)}</div>
-        </button>
-      `;
-    }).join("");
-    component?.renderTranslationItems({
-      markup,
-      hasItems: list.length > 0,
-      emptyText,
-      meta,
-      loading,
-      pageLabel,
-      canPrev: offset > 0,
-      canNext: offset + list.length < total,
-    });
+    renderTranslationItemsState(translationState, { loading, emptyText });
   }
 
   function renderTranslationItemDetail({ loading = false, emptyText = "请选择左侧 item" } = {}) {
-    const component = dialogComponent();
-    const payload = translationState.selectedItem;
-    if (loading) {
-      component?.renderTranslationItemDetail({
-        loading: true,
-        hasItem: false,
-        emptyText,
-        meta: "读取中...",
-        replayEnabled: false,
-      });
-      return;
-    }
-    if (!payload?.item) {
-      component?.renderTranslationItemDetail({
-        loading: false,
-        hasItem: false,
-        emptyText,
-        meta: "-",
-        replayEnabled: false,
-      });
-      return;
-    }
-    const item = payload.item || {};
-    const diagnostics = diagnosticsOf(item);
-    const routePath = normalizeRoutePath(routePathOf(item));
-    const pageNumber = pageNumberOf(payload, pageNumberOf(item));
-    const finalStatus = finalStatusOf(item) || finalStatusOf(payload) || "-";
-    const markup = `
-      <div class="detail-info-list translation-detail-grid">
-        ${renderField("item_id", payload.item_id || item.item_id || "-")}
-        ${renderField("page_number", pageNumber)}
-        ${renderField("block_type", item.block_type || "-")}
-        ${renderField("math_mode", item.math_mode || "-")}
-        ${renderField("classification_label", item.classification_label || "-")}
-        ${renderField("should_translate", boolLabel(item.should_translate))}
-        ${renderField("skip_reason", item.skip_reason || "-")}
-        ${renderField("final_status", finalStatus)}
-        ${renderField("route_path", routePath || "-")}
-        ${renderField("fallback_to", fallbackToOf(item) || "-")}
-        ${renderField("degradation_reason", degradationReasonOf(item) || "-")}
-      </div>
-      ${renderTextBlock("原文", item.source_text || "")}
-      ${renderTextBlock("落盘翻译", item.translated_text || item.translation_unit_translated_text || item.group_translated_text || "")}
-      ${renderTextBlock("保护后译文", item.protected_translated_text || item.translation_unit_protected_translated_text || item.group_protected_translated_text || "")}
-      ${renderTextBlock("translation_diagnostics", diagnostics || {})}
-    `;
-    component?.renderTranslationItemDetail({
-      loading: false,
-      hasItem: true,
-      markup,
-      meta: `${payload.item_id || item.item_id || "-"} · 第 ${pageNumber} 页`,
-      replayEnabled: true,
-    });
+    renderTranslationItemDetailState(translationState, { loading, emptyText });
   }
 
   function renderTranslationReplay() {
-    const replay = translationState.replay;
-    if (!replay?.payload) {
-      dialogComponent()?.renderTranslationReplay({
-        hasResult: false,
-        status: "-",
-      });
-      return;
-    }
-    const payload = replay.payload || {};
-    const markup = `
-      <div class="translation-replay-grid">
-        ${renderTextBlock("policy_before", payload.policy_before || {})}
-        ${renderTextBlock("policy_after", payload.policy_after || {})}
-        ${renderTextBlock("replay_result", payload.replay_result || {})}
-        ${renderTextBlock("replay_error", payload.replay_error || null)}
-      </div>
-    `;
-    dialogComponent()?.renderTranslationReplay({
-      hasResult: true,
-      markup,
-      status: payload.replay_error ? "重放返回错误" : "重放完成",
-    });
+    renderTranslationReplayState(translationState);
   }
 
   async function loadTranslationSummary(jobId) {
@@ -335,6 +174,10 @@ export function mountStatusDetailFeature({
     }
     await loadTranslationSummary(jobId);
     await loadTranslationItems(jobId, { selectFirst });
+  }
+
+  function resetTranslationState(jobId = "") {
+    resetTranslationStateData(translationState, jobId);
   }
 
   async function loadTranslationItems(jobId, { selectFirst = false } = {}) {
@@ -476,5 +319,6 @@ export function mountStatusDetailFeature({
     buildDetailPageUrl,
     ensureTranslationData,
     syncRerunAction,
+    ensureOverviewData,
   };
 }

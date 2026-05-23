@@ -1,69 +1,20 @@
-export function createTimerState() {
-  return {
-    timer: null,
-    elapsedTimer: null,
-  };
-}
+import { createCredentialState, resetOcrValidationState as resetOcrValidationStateSlice } from "./state/credential-state.js";
+import { createDesktopState } from "./state/desktop-state.js";
+import { createDeveloperState } from "./state/developer-state.js";
+import { createJobState, resetJobSecondaryState as resetJobSecondaryStateSlice, resetJobState as resetJobStateSlice } from "./state/job-state.js";
+import { createRecentJobsState, resetRecentJobsListState as resetRecentJobsListStateSlice } from "./state/recent-jobs-state.js";
+import { createTimerState } from "./state/timer-state.js";
+import { createUploadState, resetUploadState as resetUploadStateSlice, setUploadState as setUploadStateSlice } from "./state/upload-state.js";
 
-export function createJobState() {
-  return {
-    currentJobId: "",
-    currentJobSnapshot: null,
-    currentJobManifest: null,
-    currentJobManifestJobId: "",
-    currentJobManifestFetchedAt: 0,
-    currentJobEvents: null,
-    currentJobEventsJobId: "",
-    currentJobEventsFetchedAt: 0,
-    currentJobStageActions: null,
-    currentJobStageActionsJobId: "",
-    currentJobStageActionsFetchedAt: 0,
-    currentJobDisplayedStageKey: "",
-    currentJobDisplayedStageJobId: "",
-    currentJobStartedAt: "",
-    currentJobFinishedAt: "",
-  };
-}
-
-export function createUploadState() {
-  return {
-    uploadId: "",
-    uploadedFileName: "",
-    uploadedPageCount: 0,
-    uploadedBytes: 0,
-    appliedPageRange: "",
-  };
-}
-
-export function createRecentJobsState() {
-  return {
-    recentJobsOffset: 0,
-    recentJobsHasMore: true,
-    recentJobsDate: "",
-    recentJobsItems: [],
-  };
-}
-
-export function createCredentialState() {
-  return {
-    validatedOcrProvider: "",
-    validatedOcrToken: "",
-    ocrValidationStatus: "",
-  };
-}
-
-export function createDeveloperState() {
-  return {
-    developerConfig: {},
-  };
-}
-
-export function createDesktopState() {
-  return {
-    desktopMode: false,
-    desktopConfigured: false,
-  };
-}
+export {
+  createCredentialState,
+  createDesktopState,
+  createDeveloperState,
+  createJobState,
+  createRecentJobsState,
+  createTimerState,
+  createUploadState,
+};
 
 export function createInitialState() {
   return {
@@ -80,55 +31,25 @@ export function createInitialState() {
 export const state = createInitialState();
 
 export function resetJobState(target = state) {
-  Object.assign(target, createJobState());
+  resetJobStateSlice(target);
 }
 
 export function resetJobSecondaryState(target = state) {
-  Object.assign(target, {
-    currentJobManifest: null,
-    currentJobManifestJobId: "",
-    currentJobManifestFetchedAt: 0,
-    currentJobEvents: null,
-    currentJobEventsJobId: "",
-    currentJobEventsFetchedAt: 0,
-    currentJobStageActions: null,
-    currentJobStageActionsJobId: "",
-    currentJobStageActionsFetchedAt: 0,
-    currentJobDisplayedStageKey: "",
-    currentJobDisplayedStageJobId: "",
-  });
+  resetJobSecondaryStateSlice(target);
 }
 
-export function resetUploadState(target = state, { includePageRange = true } = {}) {
-  const next = createUploadState();
-  if (!includePageRange) {
-    delete next.appliedPageRange;
-  }
-  Object.assign(target, next);
+export function resetUploadState(target = state, options = {}) {
+  resetUploadStateSlice(target, options);
 }
 
-export function setUploadState(target = state, {
-  uploadId = "",
-  uploadedFileName = "",
-  uploadedPageCount = 0,
-  uploadedBytes = 0,
-} = {}) {
-  Object.assign(target, {
-    uploadId,
-    uploadedFileName,
-    uploadedPageCount,
-    uploadedBytes,
-  });
+export function setUploadState(target = state, payload = {}) {
+  setUploadStateSlice(target, payload);
 }
 
 export function resetRecentJobsListState(target = state) {
-  Object.assign(target, {
-    recentJobsOffset: 0,
-    recentJobsHasMore: true,
-    recentJobsItems: [],
-  });
+  resetRecentJobsListStateSlice(target);
 }
 
 export function resetOcrValidationState(target = state) {
-  Object.assign(target, createCredentialState());
+  resetOcrValidationStateSlice(target);
 }

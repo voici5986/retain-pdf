@@ -3,7 +3,10 @@ import {
   hasReadyManifestArtifact,
   resolveManifestArtifactUrl,
 } from "./job-artifacts.js";
-import { resolveJobActions } from "./job.js";
+import {
+  resolveJobActions,
+  resolveJobSourcePdfAction,
+} from "./job.js";
 import {
   clearFileInputValueView,
   resetUploadedFileView,
@@ -31,9 +34,10 @@ export function buildReaderPageUrl(jobId) {
 
 export function isReaderActionEnabled(job, manifestPayload = null) {
   const actions = resolveJobActions(job);
+  const sourcePdfAction = resolveJobSourcePdfAction(job, manifestPayload);
   return Boolean(
     job?.job_id
-    && hasReadyManifestArtifact(manifestPayload, "source_pdf")
+    && sourcePdfAction.ready
     && (hasReadyManifestArtifact(manifestPayload, "pdf")
       || hasReadyManifestArtifact(manifestPayload, "translated_pdf")
       || hasReadyManifestArtifact(manifestPayload, "result_pdf")
@@ -47,9 +51,9 @@ export function updateActionButtons(job, manifestPayload = null) {
   const markdownBundleUrl = resolveManifestArtifactUrl(manifestPayload, "markdown_bundle_zip", {
     includeJobDir: true,
   });
-  const sourcePdfUrl = resolveManifestArtifactUrl(manifestPayload, "source_pdf");
+  const sourcePdfAction = resolveJobSourcePdfAction(job, manifestPayload);
   setActionLink("markdown-bundle-btn", markdownBundleUrl, !!markdownBundleUrl);
-  setActionLink("source-pdf-btn", sourcePdfUrl, !!sourcePdfUrl);
+  setActionLink("source-pdf-btn", sourcePdfAction.url, sourcePdfAction.ready && !!sourcePdfAction.url);
   setActionLink("pdf-btn", actions.pdf, actions.pdfEnabled && !!actions.pdf);
   setActionLink("markdown-btn", actions.markdownJson, actions.markdownJsonEnabled && !!actions.markdownJson);
   setActionLink("markdown-raw-btn", actions.markdownRaw, actions.markdownRawEnabled && !!actions.markdownRaw);

@@ -1,36 +1,23 @@
-import { buildFrontendPageUrl, isMockMode } from "./config.js";
+import { isMockMode } from "./config.js";
 import { API_PREFIX } from "./constants.js";
 import { $ } from "./dom.js";
-import {
-  fileNameFromDisposition,
-  prepareDownloadTarget,
-  saveResponseDownload,
-} from "./downloads.js";
-import {
-  completeDownloadToast,
-  failDownloadToast,
-  showDownloadPreparing,
-  updateDownloadProgress,
-} from "./download-feedback.js";
 import {
   fetchJobDiagnostics,
   fetchJobArtifactsManifest,
   fetchJobEvents,
   fetchJobMarkdown,
   fetchJobPayload,
-  fetchProtected,
   fetchResumePlan,
   rerunJob,
   resumeJob,
-} from "./network.js";
+} from "./api/jobs.js";
+import { fetchProtected } from "./api/http.js";
 import {
   hasReadyManifestArtifact,
 } from "./job-artifacts.js";
 import {
   formatEventTimestamp,
   formatJobFinishedAt,
-  formatRuntimeDuration,
-  isTerminalStatus,
   normalizeJobPayload,
   resolveJobActions,
   summarizeInvocationProtocol,
@@ -59,6 +46,21 @@ import {
   bindEventsLauncher,
   bindStageHistoryLauncher,
 } from "./job-detail-events.js";
+import { bindProtectedDownloadLink } from "./job-detail-downloads.js";
+import {
+  applyDiagnostics,
+  renderFailureDebugContext,
+} from "./job-detail-failure.js";
+import {
+  buildReaderPageUrl,
+  firstNonEmptyText,
+  getJobIdFromQuery,
+} from "./job-detail-routing.js";
+import {
+  bindRerunButton,
+  summarizeResumePlan,
+} from "./job-detail-resume.js";
+import { resolveLiveDurations } from "./status-detail-utils.js";
 
 const detailPageState = {
   job: null,
@@ -71,119 +73,12 @@ const detailPageState = {
   resumePlan: null,
 };
 
-function getJobIdFromQuery() {
-  return new URLSearchParams(window.location.search).get("job_id")?.trim() || "";
-}
-
 function setText(id, value) {
   setDetailText(id, value);
 }
 
 function setActionLink(id, url, enabled) {
   setDetailActionLink(id, url, enabled);
-}
-
-function firstJobIdFromPayload(payload) {
-  return firstNonEmptyText(
-    payload?.job_id,
-    payload?.data?.job_id,
-    payload?.job?.job_id,
-    payload?.job?.id,
-    payload?.id,
-  );
-}
-
-function summarizeResumePlan(plan) {
-  if (!plan) {
-    return "当前任务暂不可恢复。";
-  }
-  if (!plan.can_resume) {
-    return plan.reason || "当前任务暂不可恢复。";
-  }
-  const fromStage = firstNonEmptyText(plan.from_stage, plan.resume_from, "checkpoint");
-  const workflow = firstNonEmptyText(plan.resume_workflow, plan.workflow);
-  const reruns = Array.isArray(plan.reruns_stages) ? plan.reruns_stages.join("、") : "";
-  const bits = [`可从 ${fromStage} 恢复`];
-  if (workflow) {
-    bits.push(`workflow=${workflow}`);
-  }
-  if (reruns) {
-    bits.push(`重跑 ${reruns}`);
-  }
-  return bits.join("，");
-}
-
-function applyDiagnostics(diagnostics, job) {
-  if (!diagnostics) {
-    return;
-  }
-  setText("detail-failure-summary", summarizeRuntimeField(diagnostics.summary || diagnostics.failure_summary || job.final_failure_summary));
-  setText("detail-failure-category", summarizeRuntimeField(diagnostics.category || diagnostics.failure_category || diagnostics.failed_category || job.final_failure_category));
-  setText("detail-failure-stage", summarizeRuntimeField(diagnostics.failed_stage || diagnostics.stage || diagnostics.failed_substage));
-  setText("detail-failure-root-cause", summarizeRuntimeField(diagnostics.root_cause || diagnostics.detail || diagnostics.raw_excerpt));
-  setText("detail-failure-suggestion", summarizeRuntimeField(diagnostics.suggestion));
-  setText("detail-failure-retryable", typeof diagnostics.retryable === "boolean" ? (diagnostics.retryable ? "是" : "否") : "-");
-}
-
-function buildReaderPageUrl(jobId) {
-  const normalizedJobId = `${jobId || ""}`.trim();
-  if (!normalizedJobId) {
-    return "";
-  }
-  return buildFrontendPageUrl("./reader.html", {
-    job_id: normalizedJobId,
-  });
-}
-
-function parseIsoTime(value) {
-  const raw = `${value || ""}`.trim();
-  if (!raw) {
-    return null;
-  }
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function resolveLiveDurations(job) {
-  const updatedAt = parseIsoTime(job.updated_at);
-  const finishedAt = parseIsoTime(job.finished_at);
-  const now = isTerminalStatus(job.status) ? finishedAt || updatedAt || new Date() : new Date();
-  const stageStartedAt = parseIsoTime(job.stage_started_at || job.last_stage_transition_at);
-  const jobStartedAt = parseIsoTime(job.started_at || job.created_at);
-  const latestStage = Array.isArray(job.stage_history) && job.stage_history.length > 0
-    ? job.stage_history[job.stage_history.length - 1]
-    : null;
-  const snapshotDeltaMs = !isTerminalStatus(job.status) && updatedAt
-    ? Math.max(0, now.getTime() - updatedAt.getTime())
-    : 0;
-  let stageElapsedMs = Number(job.active_stage_elapsed_ms);
-  let totalElapsedMs = Number(job.total_elapsed_ms);
-
-  if (isTerminalStatus(job.status)) {
-    if (!Number.isFinite(stageElapsedMs) && Number.isFinite(Number(latestStage?.duration_ms))) {
-      stageElapsedMs = Number(latestStage.duration_ms);
-    }
-  } else if (Number.isFinite(stageElapsedMs)) {
-    stageElapsedMs += snapshotDeltaMs;
-  } else if (stageStartedAt) {
-    stageElapsedMs = Math.max(0, now.getTime() - stageStartedAt.getTime());
-  } else if (Number.isFinite(Number(latestStage?.duration_ms))) {
-    stageElapsedMs = Number(latestStage.duration_ms) + snapshotDeltaMs;
-  }
-  if (isTerminalStatus(job.status)) {
-    if (!Number.isFinite(totalElapsedMs) && jobStartedAt) {
-      totalElapsedMs = Math.max(0, now.getTime() - jobStartedAt.getTime());
-    }
-  } else if (Number.isFinite(totalElapsedMs)) {
-    totalElapsedMs += snapshotDeltaMs;
-  } else if (jobStartedAt) {
-    totalElapsedMs = Math.max(0, now.getTime() - jobStartedAt.getTime());
-  }
-
-  return {
-    stageElapsedText: formatRuntimeDuration(stageElapsedMs),
-    totalElapsedText: formatRuntimeDuration(totalElapsedMs),
-  };
 }
 
 function summarizeMathMode(job) {
@@ -195,90 +90,6 @@ function summarizeMathMode(job) {
     return "direct_typst - 模型直出公式";
   }
   return mathMode || "-";
-}
-
-function escapeHtml(value) {
-  return `${value ?? ""}`
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function firstNonEmptyText(...values) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-  return "";
-}
-
-function firstDefinedValue(...values) {
-  for (const value of values) {
-    if (value !== undefined && value !== null && `${value}`.trim() !== "") {
-      return value;
-    }
-  }
-  return "";
-}
-
-function stringifyDebugValue(value) {
-  if (value == null || value === "") {
-    return "";
-  }
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return `${value}`;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch (_error) {
-    return String(value);
-  }
-}
-
-function renderFailureDebugContext(job) {
-  const container = $("detail-failure-debug-context");
-  if (!container) {
-    return;
-  }
-  const failure = job?.failure || {};
-  const diagnostic = job?.failure_diagnostic || {};
-  const rawDiagnostic = failure?.raw_diagnostic || diagnostic?.raw_diagnostic || {};
-  const logTail = Array.isArray(job?.log_tail) ? job.log_tail.filter(Boolean).slice(-8) : [];
-  const rows = [
-    ["failed_stage", firstDefinedValue(failure.failed_stage, failure.stage, diagnostic.failed_stage, diagnostic.stage, job?.stage)],
-    ["failure_code", firstDefinedValue(failure.failure_code, failure.code, diagnostic.failure_code, diagnostic.code)],
-    ["failure_category", firstDefinedValue(failure.failure_category, failure.category, diagnostic.failure_category, diagnostic.category)],
-    ["error_type", firstDefinedValue(failure.error_type, diagnostic.error_type, diagnostic.type, diagnostic.error_kind)],
-    ["provider", firstDefinedValue(failure.provider, diagnostic.provider)],
-    ["provider_stage", firstDefinedValue(failure.provider_stage, diagnostic.provider_stage)],
-    ["provider_code", firstDefinedValue(failure.provider_code, diagnostic.provider_code)],
-    ["upstream_host", firstDefinedValue(failure.upstream_host, diagnostic.upstream_host)],
-    ["retryable", firstDefinedValue(failure.retryable, diagnostic.retryable)],
-    ["raw_exception_type", firstDefinedValue(failure.raw_exception_type, diagnostic.raw_exception_type, rawDiagnostic.raw_exception_type)],
-    ["raw_exception_message", firstDefinedValue(failure.raw_exception_message, diagnostic.raw_exception_message, rawDiagnostic.raw_exception_message)],
-    ["raw_excerpt", firstDefinedValue(failure.raw_excerpt, diagnostic.raw_excerpt)],
-    ["traceback", firstDefinedValue(failure.traceback, diagnostic.traceback, rawDiagnostic.traceback)],
-    ["log_tail", logTail.length ? logTail.join("\n") : ""],
-  ]
-    .map(([label, value]) => [label, stringifyDebugValue(value)])
-    .filter(([, value]) => value);
-
-  if (!rows.length) {
-    container.innerHTML = '<div class="detail-empty">暂无结构化失败上下文</div>';
-    return;
-  }
-  container.innerHTML = rows.map(([label, value]) => `
-    <div class="detail-debug-row">
-      <div class="detail-debug-label">${escapeHtml(label)}</div>
-      <pre class="detail-debug-value">${escapeHtml(value)}</pre>
-    </div>
-  `).join("");
 }
 
 function revokeMarkdownImageUrls() {
@@ -324,89 +135,39 @@ function setEventsStatus(text) {
   setDetailEventsStatus(text);
 }
 
-function bindProtectedDownloadLink(id, fallbackNameFactory) {
-  $(id)?.addEventListener("click", async (event) => {
-    const link = event.currentTarget;
-    const enabled = link?.getAttribute("aria-disabled") !== "true";
-    const url = `${link?.href || ""}`.trim();
-    if (!enabled || !url || url.endsWith("#")) {
-      event.preventDefault();
-      return;
-    }
-    if (id === "detail-reader-btn") {
-      return;
-    }
-    event.preventDefault();
-    const fallbackName = fallbackNameFactory(detailPageState.job?.job_id || "job");
-    const downloadTarget = await prepareDownloadTarget(fallbackName);
-    if (downloadTarget.kind === "aborted") {
-      return;
-    }
-    try {
-      showDownloadPreparing(fallbackName);
-      const resp = await fetchProtected(url);
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`下载失败: ${resp.status} ${text || "unknown error"}`);
-      }
-      const disposition = resp.headers.get("content-disposition") || "";
-      const filename = fileNameFromDisposition(disposition, fallbackName);
-      await saveResponseDownload(resp, {
-        target: downloadTarget,
-        filename,
-        onProgress: ({ receivedBytes, totalBytes, percent, done }) => {
-          if (done) {
-            setText("detail-head-note", `已开始保存 ${filename}`);
-            completeDownloadToast(filename);
-            return;
-          }
-          updateDownloadProgress({ filename, receivedBytes, totalBytes, percent });
-        },
-      });
-    } catch (error) {
-      setText("detail-head-note", error.message || "下载失败");
-      failDownloadToast(error.message || "下载失败");
-    }
-  });
-}
-
-function bindRerunButton() {
-  $("detail-rerun-btn")?.addEventListener("click", async () => {
-    const button = $("detail-rerun-btn");
-    const jobId = detailPageState.job?.job_id || getJobIdFromQuery();
-    const actionUrl = `${detailPageState.rerunActionUrl || ""}`.trim();
-    if (!button || (!jobId && !actionUrl)) {
-      setText("detail-rerun-status", "当前任务暂不可从断点恢复。");
-      return;
-    }
-    button.disabled = true;
-    setText("detail-rerun-status", "正在提交恢复任务...");
-    try {
-      const payload = jobId ? await resumeJob(jobId, API_PREFIX) : await rerunJob(actionUrl);
-      const nextJobId = firstJobIdFromPayload(payload);
-      if (!nextJobId) {
-        setText("detail-rerun-status", "恢复任务已提交，但响应中没有 job_id。");
-        return;
-      }
-      setText("detail-rerun-status", `已创建恢复任务 ${nextJobId}，正在跳转...`);
-      window.location.href = buildFrontendPageUrl("./detail.html", {
-        job_id: nextJobId,
-      });
-    } catch (error) {
-      setText("detail-rerun-status", error.message || String(error));
-      button.disabled = false;
-    }
-  });
-}
-
 async function initializePage() {
   bindDetailModals();
   bindStageHistoryLauncher({ detailPageState });
   bindEventsLauncher({ detailPageState, fetchJobEvents });
-  bindRerunButton();
-  bindProtectedDownloadLink("detail-pdf-btn", (jobId) => `${jobId}.pdf`);
-  bindProtectedDownloadLink("detail-markdown-raw-btn", (jobId) => `${jobId}.md`);
-  bindProtectedDownloadLink("detail-markdown-json-btn", (jobId) => `${jobId}-markdown.json`);
+  bindRerunButton({
+    detailPageState,
+    getJobId: getJobIdFromQuery,
+    rerunJob,
+    resumeJob,
+    apiPrefix: API_PREFIX,
+    setText,
+  });
+  bindProtectedDownloadLink({
+    id: "detail-pdf-btn",
+    fallbackNameFactory: (jobId) => `${jobId}.pdf`,
+    detailPageState,
+    fetchProtected,
+    setText,
+  });
+  bindProtectedDownloadLink({
+    id: "detail-markdown-raw-btn",
+    fallbackNameFactory: (jobId) => `${jobId}.md`,
+    detailPageState,
+    fetchProtected,
+    setText,
+  });
+  bindProtectedDownloadLink({
+    id: "detail-markdown-json-btn",
+    fallbackNameFactory: (jobId) => `${jobId}-markdown.json`,
+    detailPageState,
+    fetchProtected,
+    setText,
+  });
   const jobId = getJobIdFromQuery();
   if (!jobId) {
     setText("detail-head-note", "缺少 job_id，请通过 detail.html?job_id=... 打开。");
@@ -473,7 +234,7 @@ async function initializePage() {
   setText("detail-failure-suggestion", summarizeRuntimeField(failure.suggestion || failureDiagnostic.suggestion || failure.failure_code));
   setText("detail-failure-last-log-line", summarizeRuntimeField(failureLastLogLine));
   setText("detail-failure-retryable", typeof retryable === "boolean" ? (retryable ? "是" : "否") : "-");
-  applyDiagnostics(diagnosticsPayload, job);
+  applyDiagnostics(diagnosticsPayload, job, setText);
   renderFailureDebugContext(job);
   const rerunEnabled = Boolean(resumePlan?.can_resume || (actions.rerunEnabled && actions.rerun));
   if ($("detail-rerun-btn")) {

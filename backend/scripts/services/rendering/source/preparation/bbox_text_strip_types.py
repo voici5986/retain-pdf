@@ -25,6 +25,7 @@ class BBoxTextStripResult:
     skipped_complex_page_indices: frozenset[int] = frozenset()
     skipped_no_text_overlap_page_indices: frozenset[int] = frozenset()
     strip_no_effect_page_indices: frozenset[int] = frozenset()
+    candidates: BBoxTextStripCandidates | None = None
 
 
 @dataclass(frozen=True)

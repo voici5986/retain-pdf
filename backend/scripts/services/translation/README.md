@@ -290,11 +290,64 @@ Translation 阶段当前只做两件事：
 - 把合并后的术语表注入到 LLM 控制上下文，作为翻译偏好提示
 - 在翻译结束后统计术语命中情况，并写入 `translation-manifest.json`、诊断文件和 pipeline summary
 
+运行时注入规则：
+
+- LLM 调用前会按当前 item 或 batch 的源文命中术语，只把命中的 glossary 条目写入提示词
+- 缩写表也按源文命中后再注入，避免无关缩写污染当前段落
+- `preserve` / `canonical` 这类硬术语仍只对命中的源文片段生效，不做全书无条件替换
+- 如果源文没有命中某个术语或缩写，该条目不会进入当前 prompt，也不会影响当前缓存 key
+
 明确不做的事情：
 
 - 不做翻译后强制替换
 - 不保证每个术语一定命中
 - 不直接解析 Excel 文件
+
+## Agent v1
+
+当前 agent 不是独立进程，也不是新的 provider gateway，而是 translation 服务层里的角色化能力封装。它们复用现有
+`llm/shared/provider_runtime.py`，不绕过既有模型、base_url、api_key 和结构化输出协议。
+
+已落地的角色：
+
+- `TerminologyAgent`
+  按当前源文命中术语和缩写，避免把整张术语表塞进每次 prompt。
+- `ConsistencyReviewerAgent`
+  对翻译结果做规则型质量检查，例如英文残留、placeholder 不一致、术语缺失。
+- `RepairAgent`
+  对可修复问题构造 LLM repair task，只修当前 item，不扩写上下文。
+- `TranslationAgentRuntime`
+  统一执行 LLM agent task，默认走 active provider 的 `request_chat_content`。
+- `TranslationAgentCoordinator`
+  作为服务层编排入口，把 terminology/review/repair 串成稳定接口。
+
+第一版边界：
+
+- agent 可以构造 task、执行 task、解析结果、写入诊断或 review artifact
+- agent 不直接读取 OCR 文件、不决定页面级 workflow、不写最终 PDF
+- agent 不引入新的 SDK；新增 provider 时仍先接 `llm/shared/provider_registry.py`
+- 多 agent 编排先保持在 translation 内部，外部 API 只暴露稳定产物和诊断
+
+当前主链接入：
+
+- 翻译批次和乱码修复结束后，会进入 `agent_repair` 后处理阶段
+- 默认最多修复 8 个候选项，避免 repair agent 抢占整本书主翻译吞吐
+- 可通过 `RETAIN_TRANSLATION_AGENT_REPAIR_LIMIT=0` 关闭
+- 只修复英文残留、术语缺失、协议壳等可修复问题
+- placeholder 数量/顺序错误、数学分隔符不平衡、上下文串入等硬错误只写 skip 诊断，不让 repair agent 猜
+
+后续推进顺序：
+
+1. 先把更多现有“翻译后检查 / 修复 / 术语注入”收口到 coordinator。
+2. 再把失败重试、英文残留修复、术语一致性修复接成可配置 pipeline。
+3. 最后再考虑跨段落一致性 agent 或文档级术语记忆 agent，避免一开始就改主流程太大。
+
+## 并发与失败调度
+
+- DeepSeek 官方 API 的默认翻译 workers 由 Rust API 解析为 `1000`。请求体里的 `translation.workers` 仍然可以覆盖。
+- Python HTTP 连接池会按 `configured_workers` 放大，默认上限 `1000`；可用 `RETAIN_TRANSLATION_HTTP_POOL_MAX` 临时压低。
+- 主翻译通道默认只做 1 次 HTTP attempt。timeout、429、5xx、连接错误会尽快让出 worker，进入尾部 transport retry 队列，避免一个失败项卡住后续段落。
+- 尾部 transport retry 会在主队列之后执行，默认允许 2 次 HTTP attempt，并使用更长 timeout。
 
 ## 模式说明
 

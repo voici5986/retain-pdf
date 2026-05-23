@@ -14,6 +14,7 @@ from services.translation.services.fast_path.keep_origin import _normalized_text
 from services.translation.services.fast_path.keep_origin import _plan_item_view
 from services.translation.workflow.workers import TranslationBatchRunStats
 from services.translation.workflow.workers import _adaptive_floor_limit
+from services.translation.workflow.workers import _adaptive_initial_limit
 from services.translation.workflow.workers import _allocate_translation_queue_workers
 from services.translation.workflow.workers import _slow_worker_cap
 
@@ -38,6 +39,7 @@ __all__ = [
     "chunked",
     "TranslationBatchRunStats",
     "_adaptive_floor_limit",
+    "_adaptive_initial_limit",
     "_allocate_translation_queue_workers",
     "_build_translation_batches",
     "_classify_translation_batches",

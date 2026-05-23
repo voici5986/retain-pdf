@@ -165,7 +165,7 @@ def main() -> None:
                     stage_spec_schema_version=stage_spec_schema_version,
                 ),
             )
-        )
+        ).to_mapping()
 
         summary_path = job_dirs.artifacts_dir / PIPELINE_SUMMARY_FILE_NAME
         write_pipeline_summary(

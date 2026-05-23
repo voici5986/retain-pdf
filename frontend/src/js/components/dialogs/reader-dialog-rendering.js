@@ -39,6 +39,36 @@ export function setReaderDialogToolbarButtonState(host, id, { enabled = false, u
   }
   button.disabled = !enabled;
   button.dataset.url = enabled ? url : "";
+  button.setAttribute("aria-disabled", enabled ? "false" : "true");
+}
+
+export function getReaderDialogToolbarButtonUrl(host, id) {
+  return `${host.querySelector(`#${id}`)?.dataset?.url || ""}`.trim();
+}
+
+export function setReaderDialogButtonBusy(host, id, busy, label = "生成中…") {
+  const button = host.querySelector(`#${id}`);
+  if (!button) {
+    return "";
+  }
+  const previousMarkup = button.innerHTML;
+  if (!button.dataset.defaultMarkup) {
+    button.dataset.defaultMarkup = previousMarkup;
+  }
+  if (busy) {
+    button.disabled = true;
+    button.innerHTML = `<span>${label}</span>`;
+  } else {
+    button.innerHTML = button.dataset.defaultMarkup || previousMarkup;
+  }
+  return previousMarkup;
+}
+
+export function restoreReaderDialogButton(host, id, markup) {
+  const button = host.querySelector(`#${id}`);
+  if (button && typeof markup === "string") {
+    button.innerHTML = markup;
+  }
 }
 
 export function setReaderDialogFrameSource(host, url = "about:blank") {

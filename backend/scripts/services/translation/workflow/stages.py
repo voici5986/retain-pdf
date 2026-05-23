@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
+from services.translation.core.payload import save_translations
+from services.translation.llm.shared.provider_runtime import request_chat_content
+from services.translation.services.agents import AgentRunContext
+from services.translation.services.agents import TranslationAgentCoordinator
+from services.translation.services.agents import TranslationAgentRuntime
+from services.translation.services.agents import run_agent_repair_pipeline
 from services.translation.workflow.batching.pending_units import translate_pending_units
 from services.translation.workflow.pages import save_pages
 from services.translation.workflow.page_policies import apply_page_policies
@@ -296,8 +303,103 @@ def run_garbled_reconstruction_stage(
     )
 
 
+def run_agent_repair_stage(
+    *,
+    page_payloads: dict[int, list[dict]],
+    translation_paths: dict[int, Path],
+    api_key: str,
+    model: str,
+    base_url: str,
+    translation_context: TranslationControlContext | None,
+    run_diagnostics: TranslationRunDiagnostics | None,
+) -> dict[str, int]:
+    repair_limit = _agent_repair_limit_from_env()
+    if repair_limit <= 0:
+        return {
+            "reviewed_items": 0,
+            "candidate_items": 0,
+            "repaired_items": 0,
+            "skipped_items": 0,
+            "failed_items": 0,
+        }
+    repair_started = time.perf_counter()
+    if run_diagnostics is not None:
+        run_diagnostics.mark_phase_start("agent_repair")
+    emit_stage_transition(
+        stage="agent_repair",
+        message="开始执行翻译结果修复",
+        progress_current=0,
+        progress_total=repair_limit,
+    )
+    glossary_entries = list(getattr(translation_context, "glossary_entries", []) or [])
+    coordinator = (
+        TranslationAgentCoordinator.from_control_context(translation_context)
+        if translation_context is not None
+        else TranslationAgentCoordinator()
+    )
+    runtime = TranslationAgentRuntime(
+        api_key=api_key,
+        context=AgentRunContext(model=model, base_url=base_url),
+        request_chat_content_fn=request_chat_content,
+    )
+    flat_payload: list[dict] = [item for page_idx in sorted(page_payloads) for item in page_payloads[page_idx]]
+    translated_results = {
+        str(item.get("item_id", "") or ""): {
+            "decision": "translate",
+            "translated_text": str(
+                item.get("protected_translated_text")
+                or item.get("translation_unit_protected_translated_text")
+                or item.get("translated_text")
+                or ""
+            ),
+        }
+        for item in flat_payload
+        if str(item.get("item_id", "") or "")
+    }
+    summary = run_agent_repair_pipeline(
+        payload=flat_payload,
+        translated_results=translated_results,
+        coordinator=coordinator,
+        runtime=runtime,
+        glossary_entries=glossary_entries,
+        max_items=repair_limit,
+        model=model,
+        base_url=base_url,
+    ).as_dict()
+    if summary["repaired_items"] or summary["skipped_items"] or summary["failed_items"]:
+        for page_idx, payload in page_payloads.items():
+            save_translations(translation_paths[page_idx], payload)
+    if run_diagnostics is not None:
+        run_diagnostics.mark_phase_end("agent_repair")
+    emit_stage_progress(
+        stage="agent_repair",
+        message="翻译结果修复完成",
+        progress_current=summary["repaired_items"],
+        progress_total=summary["candidate_items"],
+        elapsed_ms=int((time.perf_counter() - repair_started) * 1000),
+        payload=summary,
+    )
+    print(
+        "book: agent repair "
+        f"candidates={summary['candidate_items']} repaired={summary['repaired_items']} "
+        f"skipped={summary['skipped_items']} failed={summary['failed_items']} "
+        f"in {time.perf_counter() - repair_started:.2f}s",
+        flush=True,
+    )
+    return summary
+
+
+def _agent_repair_limit_from_env() -> int:
+    raw = str(os.environ.get("RETAIN_TRANSLATION_AGENT_REPAIR_LIMIT", "8") or "").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 8
+
+
 __all__ = [
     "format_translation_progress_message",
+    "run_agent_repair_stage",
     "run_continuation_review",
     "run_garbled_reconstruction_stage",
     "run_initial_continuation_pass",

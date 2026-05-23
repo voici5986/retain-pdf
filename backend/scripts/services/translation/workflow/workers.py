@@ -76,6 +76,13 @@ def _adaptive_floor_limit(workers: int) -> int:
     return max(1, min(8, max(1, workers)))
 
 
+def _adaptive_initial_limit(workers: int) -> int:
+    worker_count = max(1, int(workers))
+    if worker_count <= 32:
+        return worker_count
+    return min(worker_count, 32)
+
+
 def _fast_queue_targets(*, batched_fast_count: int, single_fast_count: int) -> list[tuple[str, int]]:
     return [
         (name, count)
@@ -85,6 +92,15 @@ def _fast_queue_targets(*, batched_fast_count: int, single_fast_count: int) -> l
         )
         if count > 0
     ]
+
+
+def _weighted_fast_queue_targets(*, batched_fast_count: int, single_fast_count: int) -> list[tuple[str, int]]:
+    targets: list[tuple[str, int]] = []
+    if batched_fast_count > 0:
+        targets.append(("batched_fast", max(1, batched_fast_count * 3)))
+    if single_fast_count > 0:
+        targets.append(("single_fast", max(1, single_fast_count)))
+    return targets
 
 
 def _distribute_extra_workers(remaining_after_floor: int, fast_targets: list[tuple[str, int]]) -> dict[str, int]:
@@ -141,7 +157,11 @@ def _allocate_translation_queue_workers(
     remaining_after_floor = remaining - len(fast_targets)
     for name, _count in fast_targets:
         allocation[name] = 1
-    for name, extra in _distribute_extra_workers(remaining_after_floor, fast_targets).items():
+    weighted_targets = _weighted_fast_queue_targets(
+        batched_fast_count=batched_fast_count,
+        single_fast_count=single_fast_count,
+    )
+    for name, extra in _distribute_extra_workers(remaining_after_floor, weighted_targets).items():
         allocation[name] += extra
     return allocation
 
@@ -149,10 +169,12 @@ def _allocate_translation_queue_workers(
 __all__ = [
     "TranslationBatchRunStats",
     "_adaptive_floor_limit",
+    "_adaptive_initial_limit",
     "_allocate_translation_queue_workers",
     "_distribute_extra_workers",
     "_empty_worker_allocation",
     "_fast_queue_targets",
+    "_weighted_fast_queue_targets",
     "_single_worker_allocation",
     "_slow_worker_cap",
 ]

@@ -13,7 +13,11 @@ const MATCH_MODE_OPTIONS = [
 ];
 
 export function openGlossaryDialogView() {
-  $("glossary-manager-dialog")?.showModal();
+  const dialog = $("glossary-manager-dialog");
+  if (!dialog || dialog.open) {
+    return;
+  }
+  dialog.showModal();
 }
 
 export function closeGlossaryDialogView() {

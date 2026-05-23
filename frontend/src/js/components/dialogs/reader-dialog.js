@@ -1,9 +1,12 @@
 import { bindReaderDialogEvents } from "./reader-dialog-events.js";
 import {
   closeReaderDialog,
+  getReaderDialogToolbarButtonUrl,
   openReaderDialog,
   readerDialogElements,
+  restoreReaderDialogButton,
   setReaderDialogFrameSource,
+  setReaderDialogButtonBusy,
   setReaderDialogLoadingProgress,
   setReaderDialogLoadingVisible,
   setReaderDialogToolbarButtonState,
@@ -37,6 +40,18 @@ class ReaderDialog extends HTMLElement {
 
   setToolbarButtonState(id, { enabled = false, url = "" } = {}) {
     setReaderDialogToolbarButtonState(this, id, { enabled, url });
+  }
+
+  getToolbarButtonUrl(id) {
+    return getReaderDialogToolbarButtonUrl(this, id);
+  }
+
+  setButtonBusy(id, busy, label = "生成中…") {
+    return setReaderDialogButtonBusy(this, id, busy, label);
+  }
+
+  restoreButton(id, markup) {
+    restoreReaderDialogButton(this, id, markup);
   }
 
   setFrameSource(url = "about:blank") {

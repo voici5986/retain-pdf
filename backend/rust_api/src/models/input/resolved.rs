@@ -5,6 +5,9 @@ use crate::models::{
     TranslationInput, WorkflowKind,
 };
 
+pub const DEFAULT_DEEPSEEK_TRANSLATION_WORKERS: i64 = 1000;
+pub const DEFAULT_GENERIC_TRANSLATION_WORKERS: i64 = 4;
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ResolvedJobSpec {
     pub workflow: WorkflowKind,
@@ -45,9 +48,9 @@ impl ResolvedJobSpec {
         let model = self.translation.model.to_lowercase();
         let base = self.translation.base_url.to_lowercase();
         if model.contains("deepseek") || base.contains("deepseek.com") {
-            100
+            DEFAULT_DEEPSEEK_TRANSLATION_WORKERS
         } else {
-            4
+            DEFAULT_GENERIC_TRANSLATION_WORKERS
         }
     }
 }

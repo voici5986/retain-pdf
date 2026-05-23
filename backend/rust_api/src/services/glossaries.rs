@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::db::Db;
 use crate::error::AppError;
 use crate::models::{
-    build_glossary_id, now_iso, CreateJobInput, GlossaryCsvParseInput, GlossaryEntryInput,
-    GlossaryRecord, GlossaryUpsertInput,
+    build_glossary_id, now_iso, CreateJobInput, GlossaryCsvParseInput,
+    GlossaryEntryInput, GlossaryRecord, GlossaryUpsertInput, ListGlossariesQuery,
 };
 
 const MAX_GLOSSARY_ENTRIES: usize = 200;
@@ -15,10 +15,17 @@ const MAX_GLOSSARY_NOTE_LEN: usize = 500;
 pub fn create_glossary(db: &Db, input: &GlossaryUpsertInput) -> Result<GlossaryRecord, AppError> {
     let name = normalize_glossary_name(&input.name)?;
     let entries = normalize_glossary_entries(&input.entries)?;
+    let description = normalize_glossary_description(&input.description)?;
+    let source_lang = normalize_glossary_lang(&input.source_lang)?;
+    let target_lang = normalize_glossary_lang(&input.target_lang)?;
     let now = now_iso();
     let record = GlossaryRecord {
         glossary_id: build_glossary_id(),
         name,
+        description,
+        source_lang,
+        target_lang,
+        enabled: input.enabled,
         entries,
         created_at: now.clone(),
         updated_at: now,
@@ -36,6 +43,10 @@ pub fn update_glossary(
     let record = GlossaryRecord {
         glossary_id: previous.glossary_id,
         name: normalize_glossary_name(&input.name)?,
+        description: normalize_glossary_description(&input.description)?,
+        source_lang: normalize_glossary_lang(&input.source_lang)?,
+        target_lang: normalize_glossary_lang(&input.target_lang)?,
+        enabled: input.enabled,
         entries: normalize_glossary_entries(&input.entries)?,
         created_at: previous.created_at,
         updated_at: now_iso(),
@@ -52,6 +63,43 @@ pub fn list_glossaries(db: &Db) -> Result<Vec<GlossaryRecord>, AppError> {
             .then_with(|| a.glossary_id.cmp(&b.glossary_id))
     });
     Ok(items)
+}
+
+pub fn filter_glossaries(
+    items: Vec<GlossaryRecord>,
+    query: &ListGlossariesQuery,
+) -> Vec<GlossaryRecord> {
+    items
+        .into_iter()
+        .filter(|item| query.enabled.map(|enabled| item.enabled == enabled).unwrap_or(true))
+        .filter(|item| {
+            query
+                .source_lang
+                .as_ref()
+                .map(|lang| item.source_lang.eq_ignore_ascii_case(lang.trim()))
+                .unwrap_or(true)
+        })
+        .filter(|item| {
+            query
+                .target_lang
+                .as_ref()
+                .map(|lang| item.target_lang.eq_ignore_ascii_case(lang.trim()))
+                .unwrap_or(true)
+        })
+        .filter(|item| {
+            query
+                .q
+                .as_ref()
+                .map(|needle| {
+                    let needle = needle.trim().to_lowercase();
+                    !needle.is_empty()
+                        && (item.name.to_lowercase().contains(&needle)
+                            || item.description.to_lowercase().contains(&needle)
+                            || item.glossary_id.to_lowercase().contains(&needle))
+                })
+                .unwrap_or(true)
+        })
+        .collect()
 }
 
 pub fn load_glossary_or_404(db: &Db, glossary_id: &str) -> Result<GlossaryRecord, AppError> {
@@ -186,6 +234,22 @@ fn normalize_glossary_name(name: &str) -> Result<String, AppError> {
         return Err(AppError::bad_request(format!(
             "glossary name exceeds {MAX_GLOSSARY_NAME_LEN} characters"
         )));
+    }
+    Ok(normalized.to_string())
+}
+
+fn normalize_glossary_description(description: &str) -> Result<String, AppError> {
+    let normalized = description.trim();
+    if normalized.chars().count() > 500 {
+        return Err(AppError::bad_request("glossary description exceeds 500 characters"));
+    }
+    Ok(normalized.to_string())
+}
+
+fn normalize_glossary_lang(value: &str) -> Result<String, AppError> {
+    let normalized = value.trim();
+    if normalized.chars().count() > 64 {
+        return Err(AppError::bad_request("glossary language exceeds 64 characters"));
     }
     Ok(normalized.to_string())
 }
@@ -392,7 +456,7 @@ mod tests {
 
     use crate::config::AppConfig;
     use crate::db::Db;
-    use crate::models::{CreateJobInput, GlossaryEntryInput};
+    use crate::models::{CreateJobInput, GlossaryEntryInput, glossary_to_csv_export};
     use crate::AppState;
 
     use super::*;
@@ -547,6 +611,34 @@ mod tests {
     }
 
     #[test]
+    fn glossary_csv_export_escapes_cells() {
+        let record = GlossaryRecord {
+            glossary_id: "glossary-1".to_string(),
+            name: "physics".to_string(),
+            description: String::new(),
+            source_lang: "en".to_string(),
+            target_lang: "zh-CN".to_string(),
+            enabled: true,
+            entries: vec![GlossaryEntryInput {
+                source: "density, of states".to_string(),
+                target: "态\"密度".to_string(),
+                note: "materials".to_string(),
+                level: "canonical".to_string(),
+                match_mode: "exact".to_string(),
+                context: String::new(),
+            }],
+            created_at: now_iso(),
+            updated_at: now_iso(),
+        };
+
+        let export = glossary_to_csv_export(&record);
+
+        assert!(export.csv_text.starts_with("source,target,note,level,match_mode,context\n"));
+        assert!(export.csv_text.contains("\"density, of states\""));
+        assert!(export.csv_text.contains("\"态\"\"密度\""));
+    }
+
+    #[test]
     fn merge_glossary_entries_prefers_overlay() {
         let merged = merge_glossary_entries(
             &[entry("DNA", "脱氧核糖核酸"), entry("abstract", "摘要")],
@@ -564,7 +656,12 @@ mod tests {
         let glossary = create_glossary(
             state.db.as_ref(),
             &GlossaryUpsertInput {
+                glossary_id: String::new(),
                 name: "chemistry".to_string(),
+                description: "chemistry terms".to_string(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: true,
                 entries: vec![entry("DNA", "脱氧核糖核酸"), entry("abstract", "摘要")],
             },
         )
@@ -588,7 +685,12 @@ mod tests {
         let created = create_glossary(
             state.db.as_ref(),
             &GlossaryUpsertInput {
+                glossary_id: String::new(),
                 name: "semiconductor".to_string(),
+                description: "physics glossary".to_string(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: true,
                 entries: vec![entry("band gap", "带隙")],
             },
         )
@@ -607,18 +709,103 @@ mod tests {
             state.db.as_ref(),
             &created.glossary_id,
             &GlossaryUpsertInput {
+                glossary_id: String::new(),
                 name: "physics".to_string(),
+                description: "updated".to_string(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: false,
                 entries: vec![entry("band gap", "带隙"), entry("exciton", "激子")],
             },
         )
         .expect("update glossary");
         assert_eq!(updated.name, "physics");
+        assert!(!updated.enabled);
         assert_eq!(updated.entries.len(), 2);
 
         delete_glossary(state.db.as_ref(), &created.glossary_id).expect("delete glossary");
         let err = load_glossary_or_404(state.db.as_ref(), &created.glossary_id)
             .expect_err("deleted glossary");
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn import_glossary_payload_can_update_existing_record() {
+        let state = test_state();
+        let created = create_glossary(
+            state.db.as_ref(),
+            &GlossaryUpsertInput {
+                glossary_id: String::new(),
+                name: "initial".to_string(),
+                description: String::new(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: true,
+                entries: vec![entry("band gap", "带隙")],
+            },
+        )
+        .expect("create glossary");
+
+        let updated = update_glossary(
+            state.db.as_ref(),
+            &created.glossary_id,
+            &GlossaryUpsertInput {
+                glossary_id: created.glossary_id.clone(),
+                name: "imported".to_string(),
+                description: "imported glossary".to_string(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: false,
+                entries: vec![entry("exciton", "激子")],
+            },
+        )
+        .expect("import update");
+
+        assert_eq!(updated.glossary_id, created.glossary_id);
+        assert_eq!(updated.name, "imported");
+        assert!(!updated.enabled);
+        assert_eq!(updated.entries[0].source, "exciton");
+    }
+
+    #[test]
+    fn filter_glossaries_filters_by_enabled_and_language_and_query() {
+        let items = vec![
+            GlossaryRecord {
+                glossary_id: "glossary-1".to_string(),
+                name: "physics".to_string(),
+                description: "physics glossary".to_string(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: true,
+                entries: vec![],
+                created_at: now_iso(),
+                updated_at: now_iso(),
+            },
+            GlossaryRecord {
+                glossary_id: "glossary-2".to_string(),
+                name: "chemistry".to_string(),
+                description: "chemistry glossary".to_string(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-TW".to_string(),
+                enabled: false,
+                entries: vec![],
+                created_at: now_iso(),
+                updated_at: now_iso(),
+            },
+        ];
+
+        let filtered = filter_glossaries(
+            items,
+            &ListGlossariesQuery {
+                enabled: Some(true),
+                source_lang: Some("EN".to_string()),
+                target_lang: Some("zh-cn".to_string()),
+                q: Some("physics".to_string()),
+            },
+        );
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].glossary_id, "glossary-1");
     }
 
     #[test]
@@ -630,7 +817,12 @@ mod tests {
         let glossary = create_glossary(
             state.db.as_ref(),
             &GlossaryUpsertInput {
+                glossary_id: String::new(),
                 name: "large".to_string(),
+                description: String::new(),
+                source_lang: "en".to_string(),
+                target_lang: "zh-CN".to_string(),
+                enabled: true,
                 entries: resource_entries,
             },
         )

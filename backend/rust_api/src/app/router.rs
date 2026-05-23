@@ -60,6 +60,10 @@ pub fn build_app(state: AppState) -> Router {
             post(glossaries::parse_glossary_csv_route),
         )
         .route(
+            "/api/v1/glossaries/import",
+            post(glossaries::import_glossary_route),
+        )
+        .route(
             "/api/v1/glossaries",
             post(glossaries::create_glossary_route).get(glossaries::list_glossaries_route),
         )
@@ -68,6 +72,10 @@ pub fn build_app(state: AppState) -> Router {
             get(glossaries::get_glossary_route)
                 .put(glossaries::update_glossary_route)
                 .delete(glossaries::delete_glossary_route),
+        )
+        .route(
+            "/api/v1/glossaries/:glossary_id/export.csv",
+            get(glossaries::export_glossary_csv_route),
         )
         .route("/api/v1/library/books", get(library::list_books))
         .route("/api/v1/library/books/delete", post(library::delete_books))

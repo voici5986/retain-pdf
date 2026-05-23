@@ -21,7 +21,10 @@ use rows::{
     row_to_glossary_record, row_to_job_artifact_record, row_to_job_event, row_to_job_snapshot,
     JOB_SELECT_SQL,
 };
-use schema::{ensure_events_column, ensure_jobs_column, ensure_no_legacy_artifacts_json};
+use schema::{
+    ensure_events_column, ensure_glossaries_column, ensure_jobs_column,
+    ensure_no_legacy_artifacts_json,
+};
 
 #[derive(Clone)]
 pub struct Db {
@@ -132,6 +135,10 @@ impl Db {
             CREATE TABLE IF NOT EXISTS glossaries (
                 glossary_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                source_lang TEXT NOT NULL DEFAULT '',
+                target_lang TEXT NOT NULL DEFAULT '',
+                enabled INTEGER NOT NULL DEFAULT 1,
                 entries_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -146,6 +153,10 @@ impl Db {
         let conn = self.connect()?;
         ensure_jobs_column(&conn, "runtime_json", "TEXT")?;
         ensure_jobs_column(&conn, "failure_json", "TEXT")?;
+        ensure_glossaries_column(&conn, "description", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_glossaries_column(&conn, "source_lang", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_glossaries_column(&conn, "target_lang", "TEXT NOT NULL DEFAULT ''")?;
+        ensure_glossaries_column(&conn, "enabled", "INTEGER NOT NULL DEFAULT 1")?;
         ensure_events_column(&conn, "stage_detail", "TEXT")?;
         ensure_events_column(&conn, "provider", "TEXT")?;
         ensure_events_column(&conn, "provider_stage", "TEXT")?;
@@ -370,10 +381,14 @@ impl Db {
         let conn = self.connect()?;
         conn.execute(
             r#"
-            INSERT INTO glossaries (glossary_id, name, entries_json, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            INSERT INTO glossaries (glossary_id, name, description, source_lang, target_lang, enabled, entries_json, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ON CONFLICT(glossary_id) DO UPDATE SET
                 name=excluded.name,
+                description=excluded.description,
+                source_lang=excluded.source_lang,
+                target_lang=excluded.target_lang,
+                enabled=excluded.enabled,
                 entries_json=excluded.entries_json,
                 created_at=excluded.created_at,
                 updated_at=excluded.updated_at
@@ -381,6 +396,10 @@ impl Db {
             params![
                 glossary.glossary_id,
                 glossary.name,
+                glossary.description,
+                glossary.source_lang,
+                glossary.target_lang,
+                if glossary.enabled { 1 } else { 0 },
                 serde_json::to_string(&glossary.entries)?,
                 glossary.created_at,
                 glossary.updated_at,
@@ -393,7 +412,7 @@ impl Db {
         let conn = self.connect()?;
         let glossary = conn
             .query_row(
-                "SELECT glossary_id, name, entries_json, created_at, updated_at FROM glossaries WHERE glossary_id = ?1",
+                "SELECT glossary_id, name, description, source_lang, target_lang, enabled, entries_json, created_at, updated_at FROM glossaries WHERE glossary_id = ?1",
                 params![glossary_id],
                 row_to_glossary_record,
             )
@@ -404,7 +423,7 @@ impl Db {
     pub fn list_glossaries(&self) -> Result<Vec<GlossaryRecord>> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare(
-            "SELECT glossary_id, name, entries_json, created_at, updated_at FROM glossaries ORDER BY updated_at DESC",
+            "SELECT glossary_id, name, description, source_lang, target_lang, enabled, entries_json, created_at, updated_at FROM glossaries ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], row_to_glossary_record)?;
         let mut items = Vec::new();

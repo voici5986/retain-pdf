@@ -207,6 +207,16 @@ def _apply_reconstruction(items: list[dict], translated_text: str) -> None:
         item["group_translated_text"] = translated_text
         item["classification_label"] = "llm_reconstructed_garbled"
         item["skip_reason"] = ""
+        item["final_status"] = "translated"
+        diagnostics = dict(item.get("translation_diagnostics") or {})
+        diagnostics["final_status"] = "translated"
+        diagnostics["garbled_reconstructed"] = True
+        diagnostics["degradation_reason"] = "garbled_reconstructed"
+        diagnostics["fallback_to"] = ""
+        route_path = [str(part or "") for part in diagnostics.get("route_path") or [] if str(part or "")]
+        route_path = [part for part in route_path if part != "failed"]
+        diagnostics["route_path"] = route_path + ["garbled_reconstruction"]
+        item["translation_diagnostics"] = diagnostics
 
 
 def _candidate_key(item: dict) -> str:

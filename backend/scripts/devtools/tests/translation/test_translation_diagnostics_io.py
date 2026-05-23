@@ -53,6 +53,31 @@ def test_aggregate_payload_diagnostics_whitelists_intentional_keep_origin_items(
     assert _blocking_untranslated_items(translated_pages_map) == []
 
 
+def test_translation_export_gate_allows_skipped_formula_blocks() -> None:
+    translated_pages_map = {
+        5: [
+            {
+                "item_id": "p005-b006",
+                "block_kind": "formula",
+                "block_type": "formula",
+                "policy_translate": False,
+                "should_translate": False,
+                "classification_label": "skip_interline_equation",
+                "skip_reason": "skip_interline_equation",
+                "final_status": "kept_origin",
+                "translated_text": "",
+                "protected_source_text": r"\\mathrm{SMA}_{t}=...",
+            }
+        ]
+    }
+
+    _item_diagnostics, summary = aggregate_payload_diagnostics(translated_pages_map)
+
+    assert summary["status_summary"]["kept_origin"] == 1
+    assert summary["unresolved_translation_count"] == 0
+    assert _blocking_untranslated_items(translated_pages_map) == []
+
+
 def test_blocking_untranslated_items_keeps_non_whitelisted_failures_blocking() -> None:
     translated_pages_map = {
         1: [
@@ -71,6 +96,81 @@ def test_blocking_untranslated_items_keeps_non_whitelisted_failures_blocking() -
 
     assert len(blocked) == 1
     assert blocked[0]["item_id"] == "p002-b001"
+
+
+def test_translated_status_without_translation_artifact_is_blocking() -> None:
+    translated_pages_map = {
+        1: [
+            {
+                "item_id": "p002-b002",
+                "final_status": "translated",
+                "translated_text": "",
+                "translation_diagnostics": {
+                    "route_path": ["block_level", "plain_text"],
+                    "final_status": "translated",
+                },
+            }
+        ]
+    }
+
+    _item_diagnostics, summary = aggregate_payload_diagnostics(translated_pages_map)
+    blocked = _blocking_untranslated_items(translated_pages_map)
+
+    assert summary["unresolved_translation_count"] == 1
+    assert summary["unresolved_items"][0]["item_id"] == "p002-b002"
+    assert len(blocked) == 1
+    assert blocked[0]["item_id"] == "p002-b002"
+
+
+def test_repaired_item_translation_artifact_overrides_stale_failed_diagnostics() -> None:
+    translated_pages_map = {
+        1: [
+            {
+                "item_id": "p002-b003",
+                "final_status": "translated",
+                "translated_text": "已经修复的译文",
+                "translation_diagnostics": {
+                    "route_path": ["block_level", "direct_typst", "failed"],
+                    "degradation_reason": "protocol_shell_repeated",
+                    "final_status": "failed",
+                },
+            }
+        ]
+    }
+
+    item_diagnostics, summary = aggregate_payload_diagnostics(translated_pages_map)
+    blocked = _blocking_untranslated_items(translated_pages_map)
+
+    assert summary["status_summary"]["translated"] == 1
+    assert summary["unresolved_translation_count"] == 0
+    assert item_diagnostics[0]["final_status"] == "translated"
+    assert blocked == []
+
+
+def test_garbled_reconstructed_item_with_stale_failed_item_status_is_not_blocking() -> None:
+    translated_pages_map = {
+        1: [
+            {
+                "item_id": "p002-b004",
+                "final_status": "failed",
+                "translated_text": "乱码重建后的译文",
+                "classification_label": "llm_reconstructed_garbled",
+                "translation_diagnostics": {
+                    "route_path": ["block_level", "direct_typst", "validation", "failed"],
+                    "degradation_reason": "protocol_shell_repeated",
+                    "final_status": "failed",
+                },
+            }
+        ]
+    }
+
+    item_diagnostics, summary = aggregate_payload_diagnostics(translated_pages_map)
+    blocked = _blocking_untranslated_items(translated_pages_map)
+
+    assert summary["status_summary"]["translated"] == 1
+    assert summary["unresolved_translation_count"] == 0
+    assert item_diagnostics[0]["final_status"] == "translated"
+    assert blocked == []
 
 
 def test_aggregate_payload_diagnostics_adds_debug_location_fields() -> None:

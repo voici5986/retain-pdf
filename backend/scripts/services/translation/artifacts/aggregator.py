@@ -30,7 +30,9 @@ def infer_stage_from_request_label(request_label: str) -> str:
     label = (request_label or "").strip().lower()
     if not label:
         return "unspecified"
-    if label.startswith("book: batch"):
+    if label.startswith("book: batch") or label.startswith("book: batched_fast batch"):
+        return "translation"
+    if label.startswith("book: single_fast batch") or label.startswith("book: single_slow batch"):
         return "translation"
     if label.startswith("classification page"):
         return "classification"
@@ -107,14 +109,17 @@ class TranslationRunDiagnostics:
     _adaptive_condition: threading.Condition = field(default_factory=threading.Condition, init=False, repr=False)
     _adaptive_inflight: int = field(default=0, init=False, repr=False)
     _adaptive_limit: int = field(default=0, init=False, repr=False)
+    _adaptive_initial_limit: int = field(default=0, init=False, repr=False)
     _adaptive_peak_limit: int = field(default=0, init=False, repr=False)
     _adaptive_floor_limit: int = field(default=0, init=False, repr=False)
     _adaptive_success_streak: int = field(default=0, init=False, repr=False)
     _adaptive_recent_failure_count: int = field(default=0, init=False, repr=False)
+    _adaptive_slow_success_streak: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         initial_limit = max(1, int(self.configured_workers))
         self._adaptive_limit = initial_limit
+        self._adaptive_initial_limit = initial_limit
         self._adaptive_peak_limit = initial_limit
         self._adaptive_floor_limit = max(1, min(8, initial_limit))
 
@@ -164,11 +169,17 @@ class TranslationRunDiagnostics:
             self._effective["effective_workers_single_slow"] = int(max(0, single_slow_workers))
             self._effective["slow_worker_limit"] = int(max(0, slow_worker_limit))
 
+    def set_http_pool_settings(self, *, pool_size: int, pool_cap: int) -> None:
+        with self._lock:
+            self._effective["http_pool_size"] = int(max(1, pool_size))
+            self._effective["http_pool_cap"] = int(max(1, pool_cap))
+
     def configure_adaptive_concurrency(self, *, initial_limit: int, floor_limit: int | None = None) -> None:
         limit = max(1, min(max(1, self.configured_workers), int(initial_limit or 1)))
         floor = max(1, min(limit, int(floor_limit if floor_limit is not None else min(8, limit))))
         with self._adaptive_condition:
             self._adaptive_limit = limit
+            self._adaptive_initial_limit = limit
             self._adaptive_peak_limit = max(self._adaptive_peak_limit, limit)
             self._adaptive_floor_limit = floor
             self._adaptive_condition.notify_all()
@@ -274,13 +285,28 @@ class TranslationRunDiagnostics:
             reduced = max(min_limit, int(math.floor(self._adaptive_limit * 0.5)))
             self._adaptive_limit = reduced
             self._adaptive_success_streak = 0
+            self._adaptive_slow_success_streak = 0
             return
         if success and elapsed_ms >= 90000:
-            self._adaptive_limit = max(min_limit, self._adaptive_limit - 1)
+            self._adaptive_limit = max(min_limit, int(math.floor(self._adaptive_limit * 0.5)))
             self._adaptive_success_streak = 0
+            self._adaptive_slow_success_streak = 0
+            return
+        if success and elapsed_ms >= 60000:
+            self._adaptive_limit = max(min_limit, int(math.floor(self._adaptive_limit * 0.75)))
+            self._adaptive_success_streak = 0
+            self._adaptive_slow_success_streak = 0
+            return
+        if success and elapsed_ms >= 45000:
+            self._adaptive_slow_success_streak += 1
+            self._adaptive_success_streak = 0
+            if self._adaptive_slow_success_streak >= 2:
+                self._adaptive_limit = max(min_limit, int(math.floor(self._adaptive_limit * 0.85)))
+                self._adaptive_slow_success_streak = 0
             return
         if success:
             self._adaptive_recent_failure_count = 0
+            self._adaptive_slow_success_streak = 0
             self._adaptive_success_streak += 1
             if elapsed_ms <= 15000 and self._adaptive_success_streak >= 12 and self._adaptive_limit < max_limit:
                 self._adaptive_limit += 1
@@ -395,6 +421,8 @@ class TranslationRunDiagnostics:
                 },
                 "adaptive_concurrency": {
                     "enabled": True,
+                    "configured_limit": self.configured_workers,
+                    "initial_limit": self._adaptive_initial_limit,
                     "current_limit": self._adaptive_limit,
                     "peak_limit": self._adaptive_peak_limit,
                     "floor_limit": self._adaptive_floor_limit,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from statistics import median
 
 import fitz
@@ -52,6 +53,13 @@ def _border_background(samples: bytes, width: int, height: int) -> int:
 
 def _ink_rows(samples: bytes, width: int, height: int, background: int) -> list[bool]:
     min_ink = max(2, int(width * ROW_INK_RATIO))
+    if background - INK_THRESHOLD >= 0:
+        threshold = background - INK_THRESHOLD
+        dark_table = _dark_threshold_table(threshold)
+        return [
+            sum(samples[y * width : (y + 1) * width].translate(dark_table)) >= min_ink
+            for y in range(height)
+        ]
     rows: list[bool] = []
     for y in range(height):
         start = y * width
@@ -61,6 +69,15 @@ def _ink_rows(samples: bytes, width: int, height: int, background: int) -> list[
                 ink += 1
         rows.append(ink >= min_ink)
     return rows
+
+
+@lru_cache(maxsize=256)
+def _dark_threshold_table(threshold: int) -> bytes:
+    threshold = max(0, min(255, int(threshold)))
+    return bytes.maketrans(
+        bytes(range(256)),
+        bytes(1 if value <= threshold else 0 for value in range(256)),
+    )
 
 
 def _bands(flags: list[bool], *, min_size: int) -> list[tuple[int, int]]:
@@ -100,26 +117,45 @@ def detect_first_line_indent_pt(
     font_size_pt: float,
     page_text_width_med: float,
 ) -> float:
+    return detect_first_line_indent_pt_with_displaylist(
+        source_doc,
+        None,
+        item,
+        page_idx=page_idx,
+        font_size_pt=font_size_pt,
+        page_text_width_med=page_text_width_med,
+    )
+
+
+def detect_first_line_indent_pt_with_displaylist(
+    source_doc: fitz.Document | None,
+    displaylist: fitz.DisplayList | None,
+    item: dict,
+    *,
+    page_idx: int,
+    font_size_pt: float,
+    page_text_width_med: float,
+) -> float:
     if source_doc is None or page_idx < 0 or page_idx >= len(source_doc):
         return 0.0
-    if not _is_body_paragraph(item, page_text_width_med=page_text_width_med):
-        return 0.0
-    if bbox_width(item) < MIN_BLOCK_WIDTH_PT or bbox_height(item) < MIN_BLOCK_HEIGHT_PT:
+    if not is_first_line_indent_candidate(item, page_text_width_med=page_text_width_med):
         return 0.0
     bbox = item.get("bbox", [])
-    if len(bbox) != 4:
-        return 0.0
 
     page = source_doc[page_idx]
     clip = fitz.Rect(bbox) & page.rect
     if clip.is_empty or clip.width <= 0 or clip.height <= 0:
         return 0.0
-    pix = page.get_pixmap(
-        matrix=fitz.Matrix(INDENT_RENDER_SCALE, INDENT_RENDER_SCALE),
-        colorspace=fitz.csGRAY,
-        alpha=False,
-        clip=clip,
-    )
+    matrix = fitz.Matrix(INDENT_RENDER_SCALE, INDENT_RENDER_SCALE)
+    if displaylist is not None:
+        pix = displaylist.get_pixmap(matrix=matrix, colorspace=fitz.csGRAY, alpha=False, clip=clip)
+    else:
+        pix = page.get_pixmap(
+            matrix=matrix,
+            colorspace=fitz.csGRAY,
+            alpha=False,
+            clip=clip,
+        )
     if pix.width <= 0 or pix.height <= 0:
         return 0.0
 
@@ -148,6 +184,17 @@ def detect_first_line_indent_pt(
     return round(max(0.0, min(indent_pt, max_indent)), 2)
 
 
+def is_first_line_indent_candidate(item: dict, *, page_text_width_med: float) -> bool:
+    if not _is_body_paragraph(item, page_text_width_med=page_text_width_med):
+        return False
+    if bbox_width(item) < MIN_BLOCK_WIDTH_PT or bbox_height(item) < MIN_BLOCK_HEIGHT_PT:
+        return False
+    bbox = item.get("bbox", [])
+    return len(bbox) == 4
+
+
 __all__ = [
     "detect_first_line_indent_pt",
+    "detect_first_line_indent_pt_with_displaylist",
+    "is_first_line_indent_candidate",
 ]

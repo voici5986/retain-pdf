@@ -14,6 +14,9 @@ sys.path.insert(0, str(REPO_SCRIPTS_ROOT))
 from services.translation.workflow.batching.pending_units import _translate_batch_or_keep_origin
 from services.translation.llm.shared.orchestration.batched_plain import translate_items_plain_text
 from services.translation.llm.shared.control_context import build_translation_control_context
+from services.translation.llm.shared.control_context import FallbackPolicy
+from services.translation.llm.shared.control_context import EngineProfile
+from services.translation.llm.shared.orchestration.transport import DeferredTransportRetry
 from services.translation.services.terms import GlossaryEntry
 
 
@@ -151,3 +154,108 @@ def test_translate_items_plain_text_sends_only_matched_glossary_entries_to_promp
     assert "SCF -> 自洽场" in captured["domain_guidance"]
     assert "DFTB" not in captured["domain_guidance"]
     assert "Hartree-Fock -> Hartree-Fock" not in captured["domain_guidance"]
+    assert result["a"]["translation_diagnostics"]["term_scope"]["glossary_sources"] == ["SCF"]
+    assert result["b"]["translation_diagnostics"]["term_scope"]["glossary_sources"] == ["Hartree-Fock"]
+
+
+def test_batched_plain_main_request_uses_fast_fail_http_attempt_budget() -> None:
+    captured: dict[str, int] = {}
+    batch = [
+        _item(
+            "a",
+            "This body paragraph is long enough for the batched plain translation path.",
+            _batched_plain_candidate=True,
+        ),
+        _item(
+            "b",
+            "A second body paragraph keeps this test on the direct batched request path.",
+            _batched_plain_candidate=True,
+        ),
+    ]
+    context = build_translation_control_context(
+        engine_profile=EngineProfile(
+            fallback_policy=FallbackPolicy(main_http_retry_attempts=1, tail_http_retry_attempts=3),
+        )
+    )
+
+    def _translate_batch_once(batch_arg, **kwargs):
+        captured["http_retry_attempts"] = kwargs["http_retry_attempts"]
+        return {
+            item["item_id"]: {
+                "decision": "translate",
+                "translated_text": "已翻译",
+                "final_status": "translated",
+            }
+            for item in batch_arg
+        }
+
+    result = translate_items_plain_text(
+        batch,
+        api_key="sk-test",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        request_label="test fast fail",
+        context=context,
+        diagnostics=None,
+        single_item_translator=lambda *_args, **_kwargs: {},
+        split_cached_batch_fn=lambda batch_arg, **_kwargs: ({}, batch_arg),
+        store_cached_batch_fn=lambda *_args, **_kwargs: None,
+        translate_batch_once_fn=_translate_batch_once,
+    )
+
+    assert result["a"]["translated_text"] == "已翻译"
+    assert result["b"]["translated_text"] == "已翻译"
+    assert captured["http_retry_attempts"] == 1
+
+
+def test_deferred_transport_items_are_queued_instead_of_retried_inline() -> None:
+    batch = [
+        _item(
+            "a",
+            "This body paragraph is long enough for the single-item translation path.",
+            _batched_plain_candidate=False,
+        ),
+        _item(
+            "b",
+            "A second body paragraph should still finish before tail retry starts.",
+            _batched_plain_candidate=False,
+        ),
+    ]
+    context = build_translation_control_context()
+    calls: list[str] = []
+
+    def _single_item_translator(item, **kwargs):
+        calls.append(f"{item['item_id']}:{kwargs['allow_transport_tail_defer']}")
+        if item["item_id"] == "a":
+            raise DeferredTransportRetry(item=item, route_path=["block_level"], cause=TimeoutError("timeout"))
+        return {
+            "b": {
+                "decision": "translate",
+                "translated_text": "第二段已翻译",
+                "final_status": "translated",
+            }
+        }
+
+    result = translate_items_plain_text(
+        batch,
+        api_key="sk-test",
+        model="deepseek-chat",
+        base_url="https://api.deepseek.com/v1",
+        request_label="test tail queue",
+        context=context,
+        diagnostics=None,
+        single_item_translator=_single_item_translator,
+        split_cached_batch_fn=lambda batch_arg, **_kwargs: ({}, batch_arg),
+        store_cached_batch_fn=lambda *_args, **_kwargs: None,
+        translate_batch_once_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("skip batched path")),
+    )
+
+    assert result == {
+        "b": {
+            "decision": "translate",
+            "translated_text": "第二段已翻译",
+            "final_status": "translated",
+        }
+    }
+    assert calls == ["a:True", "b:True"]
+    assert len(context.transport_tail_retry_queue) == 1

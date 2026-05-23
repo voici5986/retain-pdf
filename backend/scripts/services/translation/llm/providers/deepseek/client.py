@@ -29,6 +29,7 @@ DEFAULT_API_KEY_ENV = "DEEPSEEK_API_KEY"
 DEFAULT_API_KEY_FILE = "deepseek.env"
 TRUST_ENV_PROXY_ENV = "PDF_TRANSLATOR_TRUST_ENV_PROXY"
 STREAM_RESPONSES_ENV = "PDF_TRANSLATOR_DEEPSEEK_STREAM"
+HTTP_POOL_MAX_ENV = "RETAIN_TRANSLATION_HTTP_POOL_MAX"
 _THREAD_LOCAL = threading.local()
 HTTP_RETRY_ATTEMPTS = 2
 DNS_RETRY_MIN_ATTEMPTS = 3
@@ -64,6 +65,16 @@ _DNS_RETRY_MARKERS = (
 _DNS_CACHE_TTL_SECS = 60
 _DNS_CACHE_LOCK = threading.Lock()
 _DNS_CACHE: dict[str, float] = {}
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    value = os.environ.get(name, "")
+    if not value.strip():
+        return max(minimum, int(default))
+    try:
+        return max(minimum, int(value))
+    except ValueError:
+        return max(minimum, int(default))
 
 
 def normalize_base_url(base_url: str) -> str:
@@ -220,7 +231,9 @@ def _build_session() -> requests.Session:
     diagnostics = get_active_translation_run_diagnostics()
     pool_size = 10
     if diagnostics is not None:
-        pool_size = min(256, max(32, int(diagnostics.configured_workers)))
+        pool_cap = _env_int(HTTP_POOL_MAX_ENV, 1000, minimum=32)
+        pool_size = min(pool_cap, max(32, int(diagnostics.configured_workers)))
+        diagnostics.set_http_pool_settings(pool_size=pool_size, pool_cap=pool_cap)
     adapter = HTTPAdapter(
         pool_connections=pool_size,
         pool_maxsize=pool_size,

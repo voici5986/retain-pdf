@@ -22,9 +22,9 @@ pub use common::{
     LOG_TAIL_LIMIT,
 };
 pub use glossary::{
-    build_glossary_id, glossary_to_detail, glossary_to_summary, GlossaryCsvParseInput,
-    GlossaryCsvParseView, GlossaryDetailView, GlossaryListView, GlossaryRecord,
-    GlossarySummaryView, GlossaryUpsertInput,
+    build_glossary_id, glossary_to_csv_export, glossary_to_detail, glossary_to_summary,
+    GlossaryCsvExportView, GlossaryCsvParseInput, GlossaryCsvParseView, GlossaryDetailView,
+    GlossaryListView, GlossaryRecord, GlossarySummaryView, GlossaryUpsertInput,
 };
 pub use input::{
     CreateJobInput, GlossaryEntryInput, JobSourceInput, OcrInput, RenderInput, ResolvedJobSpec,
@@ -56,7 +56,7 @@ pub use view::{
     JobStageContractArtifactView, JobStageContractView, JobSubmissionView, JobTimestampsView,
     LibraryBatchDeleteInput, LibraryBatchDeleteResultView, LibraryBookDetailView,
     LibraryBookListItemView, LibraryBookListView, LibraryDeleteQuery, LibraryDeleteResultView,
-    ListJobEventsQuery, ListJobsQuery, ListTranslationItemsQuery, MarkdownArtifactView,
+    ListGlossariesQuery, ListJobEventsQuery, ListJobsQuery, ListTranslationItemsQuery, MarkdownArtifactView,
     MarkdownQuery, MarkdownView, NormalizationSummaryView, OcrJobSummaryView, PagePreviewQuery,
     ReaderDocumentMetadataView, ReaderMetadataView, ReaderPageMetadataView, ReaderRegionBoxView,
     ReaderRegionItemView, ReaderRegionsView, ResourceLinkView, RetryStageKind, RetryStageRequest,

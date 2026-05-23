@@ -13,6 +13,14 @@ pub(super) fn ensure_events_column(
     ensure_table_column(conn, "events", column, column_def)
 }
 
+pub(super) fn ensure_glossaries_column(
+    conn: &Connection,
+    column: &str,
+    column_def: &str,
+) -> Result<()> {
+    ensure_table_column(conn, "glossaries", column, column_def)
+}
+
 fn ensure_table_column(
     conn: &Connection,
     table: &str,

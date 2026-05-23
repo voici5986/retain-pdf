@@ -50,6 +50,7 @@ assertExists("runtime-config.js");
 assertExists("src/js/main.js");
 assertExists("src/js/reader.js");
 assertExists("src/js/reader-pdf.js");
+assertExists("src/js/reader-pdf-document.js");
 assertExists("vendor/pdfjs-dist/build/pdf.mjs");
 assertExists("vendor/pdfjs-dist/build/pdf.worker.mjs");
 assertExists("vendor/pdfjs-dist/web/pdf_viewer.css");
@@ -74,9 +75,9 @@ if (!mainHelpersJs.includes("../../vendor/pdfjs-dist/build/pdf.mjs")) {
   fail("Desktop main-helpers.js did not rewrite pdfjs import to vendor path");
 }
 
-const readerPdfJs = readFile("src/js/reader-pdf.js");
-if (!readerPdfJs.includes("../../vendor/pdfjs-dist/build/pdf.mjs")) {
-  fail("Desktop reader-pdf.js did not rewrite pdfjs import to vendor path");
+const readerPdfDocumentJs = readFile("src/js/reader-pdf-document.js");
+if (!readerPdfDocumentJs.includes("../../vendor/pdfjs-dist/build/pdf.mjs")) {
+  fail("Desktop reader-pdf-document.js did not rewrite pdfjs import to vendor path");
 }
 
 const generatedFiles = [

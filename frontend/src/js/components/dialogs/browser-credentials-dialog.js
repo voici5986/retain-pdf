@@ -48,7 +48,7 @@ class BrowserCredentialsDialog extends HTMLElement {
               <button id="browser-credential-tab-api" type="button" class="developer-tab credential-tab is-active" data-credential-tab="api" role="tab" aria-selected="true">API 设置</button>
               <button id="browser-credential-tab-task" type="button" class="developer-tab credential-tab" data-credential-tab="task" role="tab" aria-selected="false">任务选项</button>
             </div>
-            <div class="credential-card-grid credential-panels">
+            <div class="credential-panels">
               <section class="credential-panel is-active" data-credential-panel="api" role="tabpanel">
                 <div class="credential-card-grid credential-card-grid-compact">
                   <section class="credential-card">
@@ -82,6 +82,18 @@ class BrowserCredentialsDialog extends HTMLElement {
                         <button type="button" class="credential-secret-toggle" data-toggle-secret="browser-api-key" aria-label="显示或隐藏 DeepSeek API Key" title="显示或隐藏">${secretToggleIcon}</button>
                       </span>
                     </label>
+                    <label>
+                      <span class="developer-label">
+                        <span>Base URL</span>
+                      </span>
+                      <input id="browser-model-base-url" type="text" autocomplete="off" placeholder="例如 https://api.deepseek.com/v1" />
+                    </label>
+                    <label>
+                      <span class="developer-label">
+                        <span>模型名称</span>
+                      </span>
+                      <input id="browser-model-name" type="text" autocomplete="off" placeholder="例如 deepseek-v4-flash" />
+                    </label>
                     <div class="credential-card-actions">
                       <button id="browser-deepseek-validate-btn" type="button" class="secondary">${TRANSLATION_PROVIDER_DEFINITION.validationButtonLabel}</button>
                       <span id="browser-deepseek-validation" class="token-inline-status hidden">${TRANSLATION_PROVIDER_DEFINITION.validationIdleMessage}</span>
@@ -96,18 +108,22 @@ class BrowserCredentialsDialog extends HTMLElement {
               </section>
 
               <section class="credential-card credential-panel" data-credential-panel="task" role="tabpanel" hidden>
-                <div class="credential-card-head">
-                  <h3>任务选项</h3>
+                <div class="credential-card-grid credential-card-grid-compact">
+                  <section class="credential-card">
+                    <div class="credential-card-head">
+                      <h3>任务选项</h3>
+                    </div>
+                    <label>
+                      <span class="developer-label">
+                        <span>公式模式</span>
+                      </span>
+                      <select id="browser-job-math-mode" aria-label="公式模式">
+                        <option value="placeholder">占位保护</option>
+                        <option value="direct_typst">直出公式</option>
+                      </select>
+                    </label>
+                  </section>
                 </div>
-                <label>
-                  <span class="developer-label">
-                    <span>公式模式</span>
-                  </span>
-                  <select id="browser-job-math-mode" aria-label="公式模式">
-                    <option value="placeholder">占位保护</option>
-                    <option value="direct_typst">直出公式</option>
-                  </select>
-                </label>
               </section>
             </div>
             <div class="actions credential-dialog-actions">

@@ -20,6 +20,7 @@ class RenderSourcePdf:
     bbox_text_stripped_page_indices: frozenset[int] = frozenset()
     bbox_text_strip_skipped_page_indices: frozenset[int] = frozenset()
     source_text_precleaned_page_indices: frozenset[int] = frozenset()
+    bbox_text_strip_candidates: BBoxTextStripCandidates | None = None
 
 
 def build_render_source_pdf(
@@ -81,6 +82,7 @@ def build_render_source_pdf(
             | bbox_text_result.strip_no_effect_page_indices
         )
         source_text_precleaned_page_indices = bbox_text_result.changed_page_indices
+        bbox_text_strip_candidates = bbox_text_result.candidates
         if bbox_text_result.changed and bbox_text_result.output_pdf_path is not None:
             render_source_path = bbox_text_result.output_pdf_path
             if not artifact_mode:
@@ -99,6 +101,7 @@ def build_render_source_pdf(
             bbox_text_stripped_page_indices=bbox_text_stripped_page_indices,
             bbox_text_strip_skipped_page_indices=bbox_text_strip_skipped_page_indices,
             source_text_precleaned_page_indices=source_text_precleaned_page_indices,
+            bbox_text_strip_candidates=bbox_text_strip_candidates,
         )
     compress_started = time.perf_counter()
     compressed_source_path = (
@@ -116,6 +119,7 @@ def build_render_source_pdf(
             bbox_text_stripped_page_indices=bbox_text_stripped_page_indices,
             bbox_text_strip_skipped_page_indices=bbox_text_strip_skipped_page_indices,
             source_text_precleaned_page_indices=source_text_precleaned_page_indices,
+            bbox_text_strip_candidates=bbox_text_strip_candidates,
         )
     compressed_source_path.unlink(missing_ok=True)
     print("render source pdf: source image compression skipped", flush=True)
@@ -125,6 +129,7 @@ def build_render_source_pdf(
         bbox_text_stripped_page_indices=bbox_text_stripped_page_indices,
         bbox_text_strip_skipped_page_indices=bbox_text_strip_skipped_page_indices,
         source_text_precleaned_page_indices=source_text_precleaned_page_indices,
+        bbox_text_strip_candidates=bbox_text_strip_candidates,
     )
 
 

@@ -123,13 +123,19 @@ export function browserCredentialElements() {
     mineruInput: $("browser-mineru-token"),
     paddleInput: $("browser-paddle-token"),
     apiKeyInput: $("browser-api-key"),
+    modelBaseUrlInput: $("browser-model-base-url"),
+    modelNameInput: $("browser-model-name"),
     mathModeSelect: $("browser-job-math-mode"),
     trigger: $("credentials-btn"),
   };
 }
 
 export function openCredentialDialog() {
-  credentialDialog()?.showModal();
+  const dialog = credentialDialog();
+  if (!dialog || dialog.open) {
+    return;
+  }
+  dialog.showModal();
 }
 
 export function closeCredentialDialog() {
@@ -194,16 +200,20 @@ export function bindCredentialViewEvents({
   $("browser-mineru-token")?.addEventListener("input", resetMineruValidation);
   $("browser-paddle-token")?.addEventListener("input", resetPaddleValidation);
   $("browser-api-key")?.addEventListener("input", resetDeepSeekValidation);
+  $("browser-model-base-url")?.addEventListener("input", resetDeepSeekValidation);
+  $("browser-model-name")?.addEventListener("input", resetDeepSeekValidation);
   $("browser-mineru-validate-btn")?.addEventListener("click", validateOcr);
   $("browser-paddle-validate-btn")?.addEventListener("click", validateOcr);
   $("browser-deepseek-validate-btn")?.addEventListener("click", validateDeepSeek);
   $("browser-credentials-save-btn")?.addEventListener("click", save);
-  $("credentials-btn")?.addEventListener("click", open);
   document.addEventListener("click", (event) => {
-    if (event.target?.closest?.("#credentials-btn")) {
-      event.preventDefault();
-      open?.();
+    const trigger = event.target?.closest?.("#credentials-btn, #credential-gate-action");
+    if (!trigger) {
+      return;
     }
+    event.preventDefault();
+    event.stopPropagation();
+    open?.();
   });
   credentialDialog()?.querySelectorAll("[data-toggle-secret]").forEach((button) => {
     button.addEventListener("click", () => {

@@ -15,6 +15,7 @@ from services.translation.services.context.session_context import build_translat
 from services.translation.services.terms import GlossaryEntry
 from services.translation.services.terms import normalize_glossary_entries
 from services.translation.workflow.workers import _adaptive_floor_limit
+from services.translation.workflow.workers import _adaptive_initial_limit
 
 if TYPE_CHECKING:
     from services.translation.workflow.execution import TranslationExecutionRequest
@@ -77,7 +78,7 @@ def build_translation_execution_plan(request: TranslationExecutionRequest) -> Tr
     )
     effective_workers = max(1, request.workers)
     run_diagnostics.configure_adaptive_concurrency(
-        initial_limit=effective_workers,
+        initial_limit=_adaptive_initial_limit(effective_workers),
         floor_limit=_adaptive_floor_limit(effective_workers),
     )
     run_diagnostics.set_effective_settings(

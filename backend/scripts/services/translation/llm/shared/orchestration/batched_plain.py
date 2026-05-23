@@ -10,6 +10,7 @@ from services.translation.llm.shared.orchestration.batched_plain_request import 
 from services.translation.llm.shared.orchestration.batched_plain_request import emit_batch_transport_single_retry
 from services.translation.llm.shared.orchestration.batched_plain_request import should_use_direct_deepseek_batch
 from services.translation.llm.shared.orchestration.batched_plain_request import split_batched_plain_result_for_partial_retry
+from services.translation.llm.shared.orchestration.batched_plain_single import enqueue_deferred_transport_items
 from services.translation.llm.shared.orchestration.batched_plain_single import retry_deferred_transport_items
 from services.translation.llm.shared.orchestration.batched_plain_single import translate_uncached_items_single
 from services.translation.llm.shared.orchestration.metadata import should_store_translation_result
@@ -45,6 +46,7 @@ def _try_direct_batched_plain(
             target_language_name=context.target_language_name,
             diagnostics=diagnostics,
             timeout_s=context.timeout_policy.batch_plain_text_seconds,
+            http_retry_attempts=max(1, int(context.fallback_policy.main_http_retry_attempts)),
         )
         result = attach_batched_plain_metadata(uncached_batch, result, context=context)
         store_cacheable_batch_result(
@@ -142,17 +144,28 @@ def translate_items_plain_text(
         store_cached_batch_fn=store_cached_batch_fn,
     )
     merged.update(single_result)
-    merged.update(
-        retry_deferred_transport_items(
-            deferred_transport_items,
-            api_key=api_key,
-            model=model,
-            base_url=base_url,
-            request_label=request_label,
-            context=context,
-            diagnostics=diagnostics,
-            single_item_translator=single_item_translator,
-            store_cached_batch_fn=store_cached_batch_fn,
+    if not enqueue_deferred_transport_items(
+        deferred_transport_items,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        request_label=request_label,
+        context=context,
+        diagnostics=diagnostics,
+        single_item_translator=single_item_translator,
+        store_cached_batch_fn=store_cached_batch_fn,
+    ):
+        merged.update(
+            retry_deferred_transport_items(
+                deferred_transport_items,
+                api_key=api_key,
+                model=model,
+                base_url=base_url,
+                request_label=request_label,
+                context=context,
+                diagnostics=diagnostics,
+                single_item_translator=single_item_translator,
+                store_cached_batch_fn=store_cached_batch_fn,
+            )
         )
-    )
     return merged

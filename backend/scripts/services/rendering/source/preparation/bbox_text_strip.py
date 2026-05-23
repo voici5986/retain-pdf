@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import time
 
@@ -38,13 +39,14 @@ def build_bbox_text_stripped_pdf_copy(
     if not page_rects:
         return BBoxTextStripResult(
             changed=False,
+            candidates=candidates,
             pages_skipped_complex=skipped_complex,
             pages_skipped_no_text_overlap=skipped_no_text_overlap,
             skipped_complex_page_indices=frozenset(skipped_complex_page_indices),
             skipped_no_text_overlap_page_indices=frozenset(skipped_no_text_overlap_page_indices),
         )
 
-    return strip_bbox_text_rects_from_pdf_copy(
+    result = strip_bbox_text_rects_from_pdf_copy(
         source_pdf_path=source_pdf_path,
         output_pdf_path=output_pdf_path,
         page_rects=page_rects,
@@ -56,3 +58,4 @@ def build_bbox_text_stripped_pdf_copy(
         skipped_no_text_overlap_page_indices=skipped_no_text_overlap_page_indices,
         candidate_elapsed=candidate_elapsed,
     )
+    return replace(result, candidates=candidates)

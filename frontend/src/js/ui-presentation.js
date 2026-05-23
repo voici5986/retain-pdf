@@ -1,4 +1,5 @@
 import {
+  buildReaderPageUrl,
   isReaderActionEnabled,
   prepareFilePicker,
   resetUploadedFile as resetUploadedFilePresentation,
@@ -12,8 +13,8 @@ import {
 import {
   buildStatusDetailSnapshot,
   renderStatusDetailSections,
-  resolveLiveDurations,
 } from "./status-detail-presentation.js";
+import { resolveLiveDurations } from "./status-detail-utils.js";
 import {
   renderStatusCardSnapshot,
   renderStatusDetailSnapshotView,
@@ -27,12 +28,18 @@ import {
   statusActionReady,
   statusSectionStatus,
 } from "./ui-presentation-view.js";
+import {
+  keepDisplayedStageForward,
+  pinnedStagePresentation,
+} from "./ui-stage-pinning.js";
+import { normalizeStageRetryActions } from "./ui-stage-actions.js";
 import { state } from "./state.js";
 import {
   formatJobFinishedAt,
   isTerminalStatus,
   normalizeJobPayload,
   resolveJobActions,
+  resolveJobSourcePdfAction,
   summarizePublicError,
   summarizeStatus,
 } from "./job.js";
@@ -40,75 +47,6 @@ import {
 function resolveElapsedStart(job) {
   return (job?.started_at || job?.created_at || "").trim();
 }
-
-function stageRank(stageKey) {
-  return {
-    queued: 0,
-    ocr: 1,
-    translate: 2,
-    render: 3,
-    done: 4,
-  }[stageKey] ?? 0;
-}
-
-function keepDisplayedStageForward(stageKey, jobId = "") {
-  const normalizedJobId = `${jobId || ""}`.trim();
-  if (state.currentJobDisplayedStageJobId !== normalizedJobId) {
-    state.currentJobDisplayedStageKey = "";
-    state.currentJobDisplayedStageJobId = normalizedJobId;
-  }
-  const previous = `${state.currentJobDisplayedStageKey || ""}`.trim();
-  const next = `${stageKey || ""}`.trim();
-  if (next === "failed" || next === "canceled") {
-    state.currentJobDisplayedStageKey = next;
-    return {
-      stageKey: next,
-      keptPrevious: false,
-    };
-  }
-  if (!previous || stageRank(next) >= stageRank(previous)) {
-    state.currentJobDisplayedStageKey = next;
-    return {
-      stageKey: next,
-      keptPrevious: false,
-    };
-  }
-  return {
-    stageKey: previous,
-    keptPrevious: true,
-  };
-}
-
-function pinnedStagePresentation(stageKey = "") {
-  switch (stageKey) {
-    case "done":
-      return {
-        label: "完成",
-        detail: "翻译 PDF 已生成",
-      };
-    case "render":
-      return {
-        label: "第 3/4 步 · 渲染",
-        detail: "正在生成翻译后的 PDF",
-      };
-    case "translate":
-      return {
-        label: "第 2/4 步 · 翻译",
-        detail: "正在翻译正文内容",
-      };
-    case "ocr":
-      return {
-        label: "第 1/4 步 · OCR 解析",
-        detail: "正在识别 PDF 内容",
-      };
-    default:
-      return {
-        label: "等待中",
-        detail: "准备中",
-      };
-  }
-}
-
 
 function stopElapsedTicker() {
   if (state.elapsedTimer) {
@@ -191,36 +129,6 @@ export function updateJobWarning(status) {
   setJobWarningVisible(active);
 }
 
-function normalizeStageActionKey(stage = "") {
-  const value = `${stage || ""}`.trim().toLowerCase();
-  if (value === "translation" || value === "translate") {
-    return "translate";
-  }
-  if (value === "ocr" || value === "render") {
-    return value;
-  }
-  return "";
-}
-
-function normalizeStageRetryActions(stageActionsPayload = null) {
-  const stages = Array.isArray(stageActionsPayload?.stages) ? stageActionsPayload.stages : [];
-  const actions = {};
-  stages.forEach((item) => {
-    const stageKey = normalizeStageActionKey(item?.stage);
-    if (!stageKey) {
-      return;
-    }
-    actions[stageKey] = {
-      stage: item.stage === "translation" ? "translation" : stageKey,
-      label: item.label || (stageKey === "render" ? "重新渲染" : "重新执行"),
-      canRetry: item.can_retry === true,
-      disabledReason: item.disabled_reason || item.reason || "",
-      danger: item.danger === true,
-    };
-  });
-  return actions;
-}
-
 export function renderJob(payload, eventsPayload = null, manifestPayload = null, stageActionsPayload = null) {
   const job = normalizeJobPayload(payload);
   const nextJobId = job.job_id || state.currentJobId;
@@ -255,7 +163,11 @@ export function renderJob(payload, eventsPayload = null, manifestPayload = null,
     job,
     eventsPayload !== null ? eventsPayload : state.currentJobEvents,
   );
-  const displayStage = keepDisplayedStageForward(stagePresentation.stageKey, nextJobId);
+  const displayStage = keepDisplayedStageForward({
+    state,
+    stageKey: stagePresentation.stageKey,
+    jobId: nextJobId,
+  });
   stagePresentation.stageKey = displayStage.stageKey;
   if (displayStage.keptPrevious) {
     const pinned = pinnedStagePresentation(displayStage.stageKey);
@@ -282,6 +194,7 @@ export function renderJob(payload, eventsPayload = null, manifestPayload = null,
   updateActionButtons(job, manifestPayload);
   const actions = resolveJobActions(job);
   const readerEnabled = isReaderActionEnabled(job, manifestPayload);
+  const sourcePdfAction = resolveJobSourcePdfAction(job, manifestPayload);
   const stageText = stagePresentation.detail;
   if (renderStatusCardSnapshot({
       jobId: job.job_id || nextJobId || "",
@@ -307,7 +220,11 @@ export function renderJob(payload, eventsPayload = null, manifestPayload = null,
         stageActionsPayload !== null ? stageActionsPayload : state.currentJobStageActions,
       ),
       pdfReady: actions.pdfEnabled && !!actions.pdf && job.status === "succeeded",
+      pdfUrl: actions.pdf,
       readerReady: readerEnabled && job.status === "succeeded",
+      readerUrl: buildReaderPageUrl(job.job_id),
+      sourcePdfReady: sourcePdfAction.ready && !!sourcePdfAction.url && job.status === "succeeded",
+      sourcePdfUrl: sourcePdfAction.url,
       cancelEnabled: actions.cancelEnabled && !!actions.cancel,
       backHomeVisible: isTerminalStatus(job.status),
     })) {

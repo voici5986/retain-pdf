@@ -10,6 +10,7 @@ from services.translation.workflow.batching.plan import _build_translation_batch
 from services.translation.workflow.batching.plan import _classify_translation_batches
 from services.translation.workflow.batching.plan import _dedupe_pending_items
 from services.translation.workflow.batching.plan import _effective_translation_batch_size
+from services.translation.workflow.batching.plan import _adaptive_initial_limit
 from services.translation.workflow.batching.plan import TranslationBatchRunStats
 from services.translation.llm.shared.control_context import build_translation_control_context
 from services.translation.llm.shared.control_context import resolve_engine_profile
@@ -61,6 +62,15 @@ def test_deepseek_profile_can_raise_plain_batch_size() -> None:
     )
     assert context.segmentation_policy.prefer_plain_when_segment_count_leq == 6
     assert context.fallback_policy.formula_segment_attempts == 2
+    assert context.fallback_policy.main_http_retry_attempts == 1
+    assert context.fallback_policy.tail_http_retry_attempts == 2
+
+
+def test_adaptive_initial_limit_ramps_up_high_worker_counts() -> None:
+    assert _adaptive_initial_limit(1) == 1
+    assert _adaptive_initial_limit(32) == 32
+    assert _adaptive_initial_limit(64) == 32
+    assert _adaptive_initial_limit(1000) == 32
 
 
 def test_heavy_continuation_group_is_split_back_to_single_units() -> None:
@@ -431,19 +441,28 @@ def test_queue_worker_allocation_reserves_small_tail_pool() -> None:
         batched_fast_count=4,
         single_fast_count=6,
         single_slow_count=2,
-    ) == {"batched_fast": 3, "single_fast": 4, "single_slow": 1}
+    ) == {"batched_fast": 4, "single_fast": 3, "single_slow": 1}
     assert _allocate_translation_queue_workers(
         24,
         batched_fast_count=2,
         single_fast_count=10,
         single_slow_count=3,
-    ) == {"batched_fast": 4, "single_fast": 18, "single_slow": 2}
+    ) == {"batched_fast": 8, "single_fast": 14, "single_slow": 2}
     assert _allocate_translation_queue_workers(
         12,
         batched_fast_count=0,
         single_fast_count=0,
         single_slow_count=5,
     ) == {"batched_fast": 0, "single_fast": 0, "single_slow": 12}
+
+
+def test_queue_worker_allocation_prioritizes_batched_plain_throughput() -> None:
+    assert _allocate_translation_queue_workers(
+        16,
+        batched_fast_count=12,
+        single_fast_count=12,
+        single_slow_count=0,
+    ) == {"batched_fast": 11, "single_fast": 5, "single_slow": 0}
 
 
 def test_translation_batch_run_stats_reports_queue_worker_split() -> None:

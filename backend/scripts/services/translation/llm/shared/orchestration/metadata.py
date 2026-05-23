@@ -52,6 +52,21 @@ def formula_route_diagnostics(
     return diagnostics
 
 
+def term_scope_diagnostics(
+    item: dict,
+    *,
+    context=None,
+) -> dict[str, object]:
+    if context is None or not hasattr(context, "term_scope_summary_for_item"):
+        return {}
+    summary = context.term_scope_summary_for_item(item)
+    if not summary:
+        return {}
+    if not int(summary.get("glossary_total_count", 0) or 0) and not int(summary.get("abbreviation_total_count", 0) or 0):
+        return {}
+    return {"term_scope": summary}
+
+
 def restore_runtime_term_tokens(
     result: dict[str, dict[str, str]],
     *,
@@ -111,6 +126,7 @@ def attach_result_metadata(
         diagnostics["degradation_reason"] = degradation_reason
         diagnostics["final_status"] = next_payload.get("final_status", "translated")
         diagnostics.update(formula_route_diagnostics(item, context=context))
+        diagnostics.update(term_scope_diagnostics(item, context=context))
         if error_taxonomy:
             diagnostics["error_trace"] = [{"type": error_taxonomy}]
         next_payload["translation_diagnostics"] = diagnostics
@@ -142,6 +158,7 @@ def keep_origin_result_with_metadata(
         "degradation_reason": degradation_reason,
         "final_status": final_status,
         **formula_route_diagnostics(item, context=context),
+        **term_scope_diagnostics(item, context=context),
     }
     if dead_letter is not None:
         diagnostics["dead_letter"] = bool(dead_letter)

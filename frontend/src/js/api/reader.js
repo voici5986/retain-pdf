@@ -1,0 +1,39 @@
+import { buildApiHeaders, isMockMode } from "../config.js";
+import { unwrapEnvelope } from "../job.js";
+import { buildJobDetailEndpoint } from "./http.js";
+
+export async function fetchReaderRegions(jobId, apiPrefix) {
+  if (isMockMode()) {
+    void jobId;
+    void apiPrefix;
+    return { items: [] };
+  }
+  const resp = await fetch(`${buildJobDetailEndpoint(jobId, apiPrefix)}/reader/regions`, {
+    headers: buildApiHeaders(),
+  });
+  if (!resp.ok) {
+    if (resp.status === 404) {
+      return { items: [] };
+    }
+    throw new Error(`读取阅读区域失败，请稍后重试。(${resp.status})`);
+  }
+  return unwrapEnvelope(await resp.json());
+}
+
+export async function fetchReaderMetadata(jobId, apiPrefix) {
+  if (isMockMode()) {
+    void jobId;
+    void apiPrefix;
+    return null;
+  }
+  const resp = await fetch(`${buildJobDetailEndpoint(jobId, apiPrefix)}/reader/metadata`, {
+    headers: buildApiHeaders(),
+  });
+  if (!resp.ok) {
+    if (resp.status === 404) {
+      return null;
+    }
+    throw new Error(`读取阅读元数据失败，请稍后重试。(${resp.status})`);
+  }
+  return unwrapEnvelope(await resp.json());
+}

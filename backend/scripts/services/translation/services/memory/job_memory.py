@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,19 @@ from services.translation.services.memory.text import clean_term_key
 from services.translation.services.memory.text import clean_term_value
 from services.translation.services.memory.text import normalize_space
 from services.translation.services.memory.text import source_text_for_batch
+
+_STORE_LOCKS_GUARD = threading.Lock()
+_STORE_LOCKS: dict[Path, threading.Lock] = {}
+
+
+def _lock_for_path(path: Path) -> threading.Lock:
+    resolved = path.resolve()
+    with _STORE_LOCKS_GUARD:
+        lock = _STORE_LOCKS.get(resolved)
+        if lock is None:
+            lock = threading.Lock()
+            _STORE_LOCKS[resolved] = lock
+        return lock
 
 
 @dataclass
@@ -134,7 +148,7 @@ class JobMemory:
 class JobMemoryStore:
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._lock = threading.Lock()
+        self._lock = _lock_for_path(path)
 
     def load(self) -> JobMemory:
         if not self.path.exists():
@@ -150,7 +164,7 @@ class JobMemoryStore:
     def save(self, memory: JobMemory) -> None:
         memory.trim()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        tmp_path = self.path.with_name(f"{self.path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
         tmp_path.write_text(
             json.dumps(memory.to_dict(), ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",

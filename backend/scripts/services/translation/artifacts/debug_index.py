@@ -35,6 +35,7 @@ def build_translation_debug_index(translated_pages_map: dict[int, list[dict]]) -
                 for part in (diagnostics.get("route_path") or [])
                 if str(part or "").strip()
             ]
+            term_scope = diagnostics.get("term_scope") if isinstance(diagnostics.get("term_scope"), dict) else {}
             items.append(
                 {
                     "item_id": str(item.get("item_id", "") or ""),
@@ -65,6 +66,7 @@ def build_translation_debug_index(translated_pages_map: dict[int, list[dict]]) -
                     "request_label": str(diagnostics.get("request_label", "") or ""),
                     "raw_excerpt": raw_excerpt_from_diagnostics(diagnostics),
                     "error_types": error_types,
+                    "term_scope": term_scope,
                 }
             )
     return {

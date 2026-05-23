@@ -60,6 +60,10 @@ def build_transport_tail_retry_context(context):
         fallback_policy=replace(
             context.fallback_policy,
             plain_text_attempts=max(context.fallback_policy.plain_text_attempts, 3),
+            main_http_retry_attempts=max(
+                context.fallback_policy.main_http_retry_attempts,
+                context.fallback_policy.tail_http_retry_attempts,
+            ),
         ),
         timeout_policy=replace(
             context.timeout_policy,

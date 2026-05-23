@@ -12,51 +12,35 @@ from runtime.pipeline.render_stage import build_book_pipeline
 from runtime.pipeline.render_stage import run_render_stage
 from runtime.pipeline.translation_stage import translate_book_pipeline
 from services.rendering.source.prewarm import prewarm_manifest_path_from_artifacts_dir
+from services.translation.public import is_blocking_untranslated
+from services.translation.public import item_final_status
 from services.translation.public import write_translation_debug_index
 from services.translation.public import write_translation_diagnostics
 from services.translation.public import GlossaryEntry
-
-
-ALLOWED_UNTRANSLATED_ROUTE_NAMES = {
-    "fast_path_keep_origin",
-}
-ALLOWED_UNTRANSLATED_REASONS = {
-    "code",
-    "keep_origin",
-    "no_trans",
-    "skip_display_formula",
-    "skip_model_keep_origin",
-}
-
-
-def _item_allowed_untranslated(item: dict, diagnostics: dict) -> bool:
-    route_path = {str(route or "").strip() for route in diagnostics.get("route_path") or []}
-    if route_path & ALLOWED_UNTRANSLATED_ROUTE_NAMES:
-        return True
-    reasons = {
-        str(item.get("skip_reason", "") or "").strip(),
-        str(item.get("classification_label", "") or "").strip(),
-        str(diagnostics.get("degradation_reason", "") or "").strip(),
-        str(diagnostics.get("fallback_to", "") or "").strip(),
-    }
-    return bool(reasons & ALLOWED_UNTRANSLATED_REASONS)
 
 
 def _blocking_untranslated_items(translated_pages_map: dict[int, list[dict]]) -> list[dict[str, object]]:
     blocked: list[dict[str, object]] = []
     for page_idx, items in sorted(translated_pages_map.items()):
         for item in items:
-            final_status = str(item.get("final_status", "") or "").strip()
-            if final_status not in {"kept_origin", "failed"}:
-                continue
             diagnostics = dict(item.get("translation_diagnostics") or {})
-            if _item_allowed_untranslated(item, diagnostics):
+            if (
+                str(item.get("final_status", "") or "").strip() == "translated"
+                and (
+                    item.get("translated_text")
+                    or item.get("protected_translated_text")
+                    or item.get("translation_unit_translated_text")
+                    or item.get("translation_unit_protected_translated_text")
+                )
+            ):
+                diagnostics["final_status"] = "translated"
+            if not is_blocking_untranslated(item, diagnostics):
                 continue
             blocked.append(
                 {
                     "item_id": str(item.get("item_id", "") or ""),
                     "page_idx": int(item.get("page_idx", page_idx) or page_idx),
-                    "final_status": final_status,
+                    "final_status": item_final_status(item, diagnostics),
                     "reason": str(diagnostics.get("degradation_reason", "") or diagnostics.get("fallback_to", "") or "untranslated"),
                 }
             )

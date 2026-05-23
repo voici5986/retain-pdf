@@ -77,6 +77,18 @@ pub struct ListJobsQuery {
     pub provider: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct ListGlossariesQuery {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub source_lang: Option<String>,
+    #[serde(default)]
+    pub target_lang: Option<String>,
+    #[serde(default)]
+    pub q: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ListJobEventsQuery {
     #[serde(default = "default_event_limit")]

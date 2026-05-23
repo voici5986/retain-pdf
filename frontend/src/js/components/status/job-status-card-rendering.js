@@ -1,14 +1,31 @@
-export function syncPrimaryActions(host, { pdfReady = false, readerReady = false } = {}) {
+function setActionLinkState(link, { ready = false, url = "" } = {}) {
+  if (!link) {
+    return;
+  }
+  const enabled = Boolean(ready && url);
+  link.classList.toggle("hidden", !ready);
+  link.classList.toggle("disabled", !enabled);
+  link.setAttribute("aria-disabled", enabled ? "false" : "true");
+  link.href = enabled ? url : "#";
+  link.dataset.url = enabled ? url : "";
+}
+
+export function syncPrimaryActions(host, {
+  pdfReady = false,
+  readerReady = false,
+  pdfUrl = "",
+  readerUrl = "",
+  sourcePdfReady = false,
+  sourcePdfUrl = "",
+} = {}) {
   const pdfBtn = host.querySelector("#pdf-btn");
   const readerBtn = host.querySelector("#reader-btn");
+  const sourcePdfBtn = host.querySelector("#source-pdf-btn");
   const actionRow = host.querySelector(".status-result-actions");
-  if (pdfBtn) {
-    pdfBtn.classList.toggle("hidden", !pdfReady);
-  }
-  if (readerBtn) {
-    readerBtn.classList.toggle("hidden", !readerReady);
-  }
-  actionRow?.classList.toggle("hidden", !(pdfReady || readerReady));
+  setActionLinkState(pdfBtn, { ready: pdfReady, url: pdfUrl });
+  setActionLinkState(readerBtn, { ready: readerReady, url: readerUrl });
+  setActionLinkState(sourcePdfBtn, { ready: sourcePdfReady, url: sourcePdfUrl });
+  actionRow?.classList.toggle("hidden", !(pdfReady || readerReady || sourcePdfReady));
 }
 
 export function setElapsed(host, value = "-") {

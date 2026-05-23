@@ -7,31 +7,9 @@ from services.pipeline_shared.io import save_json
 from .aggregator import TranslationRunDiagnostics
 from .item_summary import normalized_item_diagnostics
 from .models import FinalStatus
-
-
-ALLOWED_UNTRANSLATED_ROUTE_NAMES = {
-    "fast_path_keep_origin",
-}
-ALLOWED_UNTRANSLATED_REASONS = {
-    "code",
-    "keep_origin",
-    "no_trans",
-    "skip_display_formula",
-    "skip_model_keep_origin",
-}
-
-
-def _is_allowed_untranslated(item: dict, payload: dict, route_path: list) -> bool:
-    route_names = {str(route or "").strip() for route in route_path}
-    if route_names & ALLOWED_UNTRANSLATED_ROUTE_NAMES:
-        return True
-    reasons = {
-        str(item.get("skip_reason", "") or "").strip(),
-        str(item.get("classification_label", "") or "").strip(),
-        str(payload.get("degradation_reason", "") or "").strip(),
-        str(payload.get("fallback_to", "") or "").strip(),
-    }
-    return bool(reasons & ALLOWED_UNTRANSLATED_REASONS)
+from .status import has_repaired_translation_artifact
+from .status import has_translation_artifact
+from .status import is_blocking_untranslated
 
 
 def write_translation_diagnostics(
@@ -73,25 +51,19 @@ def aggregate_payload_diagnostics(translated_pages_map: dict[int, list[dict]]) -
             payload = dict(item.get("translation_diagnostics") or {})
             item_final_status = str(item.get("final_status", "") or "").strip()
             final_status = str(payload.get("final_status", "") or item_final_status or "").strip()
-            has_translation_artifact = bool(
-                str(
-                    item.get("translated_text")
-                    or item.get("protected_translated_text")
-                    or item.get("translation_unit_translated_text")
-                    or item.get("translation_unit_protected_translated_text")
-                    or ""
-                ).strip()
-            )
-            if not payload and not final_status and not has_translation_artifact:
+            item_has_translation_artifact = has_translation_artifact(item)
+            if not payload and not final_status and not item_has_translation_artifact:
                 continue
-            # Payload-level diagnostics can still say "translated" even when policy has already
-            # settled the item to kept_origin/failed. Use the item terminal state as the source
-            # of truth when no translated artifact exists.
+            # Payload-level diagnostics can be stale after a later repair stage rewrites the item.
+            # Prefer the item terminal state when a real translated artifact exists.
             if (
-                item_final_status
-                and item_final_status != FinalStatus.TRANSLATED.value
-                and not has_translation_artifact
-            ):
+                item_final_status == FinalStatus.TRANSLATED.value
+                and item_has_translation_artifact
+            ) or has_repaired_translation_artifact(item, payload):
+                final_status = FinalStatus.TRANSLATED.value
+            # Conversely, failed/kept_origin item terminal states remain authoritative when no
+            # translated artifact exists.
+            elif item_final_status and item_final_status != FinalStatus.TRANSLATED.value and not item_has_translation_artifact:
                 final_status = item_final_status
             payload = normalized_item_diagnostics(item, payload, page_idx=page_idx)
             final_status = final_status or FinalStatus.TRANSLATED.value
@@ -106,11 +78,7 @@ def aggregate_payload_diagnostics(translated_pages_map: dict[int, list[dict]]) -
                         "reason": payload.get("degradation_reason", "") or "dead_letter_queue",
                     }
                 )
-            blocking_untranslated = final_status in {
-                FinalStatus.KEPT_ORIGIN.value,
-                FinalStatus.FAILED.value,
-            } and not _is_allowed_untranslated(item, payload, route_path)
-            if blocking_untranslated:
+            if is_blocking_untranslated(item, payload, route_path):
                 unresolved_items.append(
                     {
                         "item_id": payload.get("item_id", ""),

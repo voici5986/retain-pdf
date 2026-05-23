@@ -117,3 +117,47 @@ def test_execution_plan_uses_only_explicit_glossary_entries(tmp_path: Path) -> N
     assert sources["SCF"].level == "preferred"
     assert "Hartree-Fock" not in sources
     assert plan.translation_context.glossary_entries == plan.glossary_entries
+
+
+def test_execution_plan_ramps_up_high_configured_workers(tmp_path: Path) -> None:
+    source_json = tmp_path / "document.v1.json"
+    source_json.write_text(
+        json.dumps(
+            {
+                "schema": "normalized_document_v1",
+                "schema_version": "1.1",
+                "document_id": "ramp-up-test",
+                "source": {"provider": "test", "provider_version": "test", "raw_files": {}},
+                "page_count": 1,
+                "pages": [
+                    {
+                        "page_index": 0,
+                        "width": 200.0,
+                        "height": 120.0,
+                        "unit": "pt",
+                        "blocks": [],
+                    }
+                ],
+                "derived": {},
+                "markers": {},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_translation_execution_plan(
+        TranslationExecutionRequest(
+            source_json_path=source_json,
+            output_dir=tmp_path / "translated",
+            api_key="sk-test",
+            workers=1000,
+        )
+    )
+    summary = plan.run_diagnostics.build_summary()
+
+    assert summary["configured_workers"] == 1000
+    assert summary["adaptive_concurrency"]["configured_limit"] == 1000
+    assert summary["adaptive_concurrency"]["initial_limit"] == 32
+    assert summary["adaptive_concurrency"]["current_limit"] == 32
+    assert summary["adaptive_concurrency"]["floor_limit"] == 8

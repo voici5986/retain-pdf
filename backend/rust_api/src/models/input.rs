@@ -148,7 +148,7 @@ mod tests {
 
         assert!(!spec.job_id.trim().is_empty());
         assert_eq!(spec.source.upload_id, "upload-1");
-        assert_eq!(spec.resolved_workers(), 100);
+        assert_eq!(spec.resolved_workers(), 1000);
     }
 }
 #[path = "input/translation.rs"]

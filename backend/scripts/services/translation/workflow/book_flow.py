@@ -4,6 +4,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from services.translation.workflow.stages import run_continuation_review
+from services.translation.workflow.stages import run_agent_repair_stage
 from services.translation.workflow.stages import run_garbled_reconstruction_stage
 from services.translation.workflow.stages import run_initial_continuation_pass
 from services.translation.workflow.stages import run_page_policy_stage
@@ -116,6 +117,16 @@ def translate_book_with_global_continuations(
         model=model,
         base_url=base_url,
         workers=workers,
+        run_diagnostics=run_diagnostics,
+    )
+
+    run_agent_repair_stage(
+        page_payloads=page_payloads,
+        translation_paths=translation_paths,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        translation_context=translation_context,
         run_diagnostics=run_diagnostics,
     )
 

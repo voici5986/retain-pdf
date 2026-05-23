@@ -1,5 +1,6 @@
 from services.translation.core.terms.abbreviations import AbbreviationEntry
 from services.translation.core.terms.abbreviations import build_abbreviation_guidance
+from services.translation.core.terms.abbreviations import matched_abbreviation_entries
 from services.translation.core.terms.glossary import GlossaryEntry
 from services.translation.core.terms.glossary import build_glossary_guidance
 from services.translation.core.terms.glossary import context_matches
@@ -18,6 +19,7 @@ __all__ = [
     "build_terms_guidance",
     "context_matches",
     "glossary_hard_entries",
+    "matched_abbreviation_entries",
     "matched_glossary_entries",
     "normalize_glossary_entries",
     "parse_glossary_json",

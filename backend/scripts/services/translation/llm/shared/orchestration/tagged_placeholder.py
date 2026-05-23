@@ -59,7 +59,11 @@ def translate_stable_placeholder_text(
         target_language_name=context.target_language_name,
         diagnostics=diagnostics,
         timeout_s=plain_text_timeout_seconds(item, context=context),
-        http_retry_attempts=single_item_http_retry_attempts(item),
+        http_retry_attempts=single_item_http_retry_attempts(
+            item,
+            context=context,
+            transport_tail_retry=False,
+        ),
     )
     restored = restore_placeholder_aliases(result, alias_to_original)
     restored = restore_runtime_term_tokens(restored, item=item)

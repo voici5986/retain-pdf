@@ -42,7 +42,11 @@ def try_plain_text_request(
         target_language_name=context.target_language_name,
         diagnostics=diagnostics,
         timeout_s=plain_timeout_s,
-        http_retry_attempts=single_item_http_retry_attempts(item),
+        http_retry_attempts=single_item_http_retry_attempts(
+            item,
+            context=context,
+            transport_tail_retry=False,
+        ),
     )
     result = restore_runtime_term_tokens(result, item=item)
     return attach_result_metadata(
@@ -81,7 +85,11 @@ def try_raw_plain_text_fallback(
         target_language_name=context.target_language_name,
         diagnostics=diagnostics,
         timeout_s=plain_timeout_s,
-        http_retry_attempts=single_item_http_retry_attempts(item),
+        http_retry_attempts=single_item_http_retry_attempts(
+            item,
+            context=context,
+            transport_tail_retry=False,
+        ),
     )
     if request_label:
         print(f"{request_label}: raw plain-text single-item ok in {time.perf_counter() - raw_started:.2f}s", flush=True)

@@ -7,6 +7,7 @@ from services.translation.artifacts import TranslationDiagnosticsCollector
 from services.translation.llm.result_validator import validate_batch_result
 from services.translation.llm.shared.orchestration.common import is_continuation_or_group_unit
 from services.translation.llm.shared.orchestration.common import sentence_level_fallback_allowed
+from services.translation.llm.shared.orchestration.common import single_item_http_retry_attempts
 from services.translation.llm.shared.orchestration.direct_typst_long_text import should_split_direct_typst_long_text
 from services.translation.llm.shared.orchestration.direct_typst_long_text import translate_direct_typst_long_text_chunks
 from services.translation.llm.shared.orchestration.direct_typst_repair import try_repair_direct_typst_math_delimiters
@@ -98,6 +99,11 @@ def translate_direct_typst_plain_text_with_retries(
                 target_language_name=context.target_language_name,
                 diagnostics=diagnostics,
                 timeout_s=plain_timeout_s,
+                http_retry_attempts=single_item_http_retry_attempts(
+                    item,
+                    context=context,
+                    transport_tail_retry=False,
+                ),
             )
             result = restore_runtime_term_tokens(result, item=item)
             result = attach_result_metadata(

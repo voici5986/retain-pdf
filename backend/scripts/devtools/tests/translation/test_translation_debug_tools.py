@@ -43,6 +43,11 @@ def test_build_translation_debug_index_keeps_core_item_fields() -> None:
                     "raw_excerpt": "raw model output",
                     "error_trace": [{"type": "validation", "code": "TEST"}],
                     "final_status": "translated",
+                    "term_scope": {
+                        "glossary_total_count": 2,
+                        "glossary_matched_count": 1,
+                        "glossary_sources": ["SCF"],
+                    },
                 },
             }
         ]
@@ -63,6 +68,7 @@ def test_build_translation_debug_index_keeps_core_item_fields() -> None:
     assert index["items"][0]["request_label"] == "book: batch 1/1 item 1/1"
     assert index["items"][0]["raw_excerpt"] == "raw model output"
     assert index["items"][0]["error_types"] == ["validation"]
+    assert index["items"][0]["term_scope"]["glossary_sources"] == ["SCF"]
     assert index["items"][0]["source_preview"].startswith("This is a long English")
 
 

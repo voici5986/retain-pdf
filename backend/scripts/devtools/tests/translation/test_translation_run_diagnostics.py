@@ -146,6 +146,9 @@ class TranslationRunDiagnosticsTests(unittest.TestCase):
             "other",
         )
         self.assertEqual(infer_stage_from_request_label("book: batch 1/10"), "translation")
+        self.assertEqual(infer_stage_from_request_label("book: batched_fast batch 1/10"), "translation")
+        self.assertEqual(infer_stage_from_request_label("book: single_fast batch 1/10"), "translation")
+        self.assertEqual(infer_stage_from_request_label("book: single_slow batch 1/10"), "translation")
         self.assertEqual(infer_stage_from_request_label("classification page 2"), "classification")
         self.assertEqual(infer_stage_from_request_label("mixed-split item-1"), "mixed_literal_split")
 
@@ -244,6 +247,46 @@ class TranslationRunDiagnosticsTests(unittest.TestCase):
         self.assertEqual(summary["retry_summary"]["max_http_attempt"], 2)
         self.assertLess(summary["adaptive_concurrency"]["current_limit"], 16)
 
+    def test_deepseek_session_pool_scales_to_configured_workers(self):
+        deepseek_client = load_deepseek_client()
+        run = TranslationRunDiagnostics(
+            provider_family="deepseek_official",
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            configured_workers=1000,
+            configured_batch_size=1,
+            configured_classify_batch_size=12,
+        )
+        with translation_run_diagnostics_scope(run):
+            with patch.dict(deepseek_client.os.environ, {}, clear=False):
+                session = deepseek_client._build_session()
+        try:
+            summary = run.build_summary()
+            self.assertEqual(summary["http_pool_cap"], 1000)
+            self.assertEqual(summary["http_pool_size"], 1000)
+        finally:
+            session.close()
+
+    def test_deepseek_session_pool_cap_can_be_lowered_by_env(self):
+        deepseek_client = load_deepseek_client()
+        run = TranslationRunDiagnostics(
+            provider_family="deepseek_official",
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            configured_workers=1000,
+            configured_batch_size=1,
+            configured_classify_batch_size=12,
+        )
+        with translation_run_diagnostics_scope(run):
+            with patch.dict(deepseek_client.os.environ, {"RETAIN_TRANSLATION_HTTP_POOL_MAX": "128"}, clear=False):
+                session = deepseek_client._build_session()
+        try:
+            summary = run.build_summary()
+            self.assertEqual(summary["http_pool_cap"], 128)
+            self.assertEqual(summary["http_pool_size"], 128)
+        finally:
+            session.close()
+
     def test_adaptive_concurrency_applies_to_any_provider_family(self):
         run = TranslationRunDiagnostics(
             provider_family="other",
@@ -276,8 +319,45 @@ class TranslationRunDiagnosticsTests(unittest.TestCase):
 
         summary = run.build_summary()
         self.assertTrue(summary["adaptive_concurrency"]["enabled"])
+        self.assertEqual(summary["adaptive_concurrency"]["configured_limit"], 16)
+        self.assertEqual(summary["adaptive_concurrency"]["initial_limit"], 16)
         self.assertEqual(summary["adaptive_concurrency"]["floor_limit"], 4)
         self.assertLess(summary["adaptive_concurrency"]["current_limit"], 16)
+
+    def test_adaptive_concurrency_downshifts_on_slow_successes(self):
+        run = TranslationRunDiagnostics(
+            provider_family="deepseek_official",
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            configured_workers=1000,
+            configured_batch_size=1,
+            configured_classify_batch_size=12,
+        )
+        run.configure_adaptive_concurrency(initial_limit=32, floor_limit=8)
+
+        run.release_request_slot(success=True, elapsed_ms=90000)
+        summary = run.build_summary()
+        self.assertEqual(summary["adaptive_concurrency"]["current_limit"], 16)
+
+        run.release_request_slot(success=True, elapsed_ms=60000)
+        summary = run.build_summary()
+        self.assertEqual(summary["adaptive_concurrency"]["current_limit"], 12)
+
+    def test_adaptive_concurrency_downshifts_after_repeated_moderately_slow_successes(self):
+        run = TranslationRunDiagnostics(
+            provider_family="deepseek_official",
+            model="deepseek-chat",
+            base_url="https://api.deepseek.com/v1",
+            configured_workers=1000,
+            configured_batch_size=1,
+            configured_classify_batch_size=12,
+        )
+        run.configure_adaptive_concurrency(initial_limit=32, floor_limit=8)
+
+        run.release_request_slot(success=True, elapsed_ms=45000)
+        self.assertEqual(run.build_summary()["adaptive_concurrency"]["current_limit"], 32)
+        run.release_request_slot(success=True, elapsed_ms=45000)
+        self.assertEqual(run.build_summary()["adaptive_concurrency"]["current_limit"], 27)
 
     def test_request_chat_content_retries_dns_failures_even_when_max_attempts_is_one(self):
         deepseek_client = load_deepseek_client()

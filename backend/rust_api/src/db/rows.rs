@@ -151,13 +151,17 @@ pub(super) fn row_to_job_artifact_record(row: &Row<'_>) -> rusqlite::Result<JobA
 }
 
 pub(super) fn row_to_glossary_record(row: &Row<'_>) -> rusqlite::Result<GlossaryRecord> {
-    let entries_json: String = row.get(2)?;
+    let entries_json: String = row.get(6)?;
     Ok(GlossaryRecord {
         glossary_id: row.get(0)?,
         name: row.get(1)?,
+        description: row.get(2)?,
+        source_lang: row.get(3)?,
+        target_lang: row.get(4)?,
+        enabled: row.get::<_, i64>(5)? != 0,
         entries: serde_json::from_str(&entries_json).unwrap_or_default(),
-        created_at: row.get(3)?,
-        updated_at: row.get(4)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }
 

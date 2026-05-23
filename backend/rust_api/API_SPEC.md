@@ -893,6 +893,15 @@ Named glossary endpoints:
 - `PUT /api/v1/glossaries/{glossary_id}`
 - `DELETE /api/v1/glossaries/{glossary_id}`
 - `POST /api/v1/glossaries/parse-csv`
+- `POST /api/v1/glossaries/import`
+- `GET /api/v1/glossaries/{glossary_id}/export.csv`
+
+`GET /api/v1/glossaries` supports optional filters:
+
+- `enabled=true|false`
+- `source_lang=en`
+- `target_lang=zh-CN`
+- `q=physics`
 
 Create / update request body:
 
@@ -910,6 +919,10 @@ List item / detail fields:
 
 - `glossary_id`
 - `name`
+- `description`
+- `source_lang`
+- `target_lang`
+- `enabled`
 - `entry_count`
 - `entries`
 - `created_at`
@@ -924,6 +937,26 @@ CSV parse helper request:
 ```
 
 CSV parse helper response returns normalized `entries` and `entry_count`. It accepts plain CSV text only; Excel files should be converted by the frontend first.
+
+CSV export:
+
+- `GET /api/v1/glossaries/{glossary_id}/export.csv`
+- Returns `Content-Type: text/csv; charset=utf-8`
+- Columns: `source,target,note,level,match_mode,context`
+
+Recommended import flow:
+
+1. Frontend reads a user CSV file as text.
+2. Frontend calls `POST /api/v1/glossaries/parse-csv`.
+3. Frontend shows normalized rows for review.
+4. Frontend saves with `POST /api/v1/glossaries` or `PUT /api/v1/glossaries/{glossary_id}`.
+
+JSON import:
+
+- `POST /api/v1/glossaries/import`
+- Body shape is the same as create / update request body.
+- If `glossary_id` is empty or omitted, the backend creates a new glossary.
+- If `glossary_id` is provided, the backend updates that existing glossary.
 
 ## 3. Get Job Detail
 
@@ -1186,6 +1219,8 @@ Main job detail now also includes OCR-child-facing fields in `artifacts` / detai
 If a client needs the full adapter / defaults / validation report, it should download `artifacts.normalization_report`.
 
 `glossary_summary` is loaded from `translation-manifest.json` when present, and falls back to the pipeline summary artifact.
+It is a task-side usage snapshot, not the glossary resource itself.
+It tells the frontend which named glossary was actually used for this job and how many entries were enabled, overridden, and matched during translation.
 
 `invocation` is loaded from `translation-manifest.json` when present, and falls back to the pipeline summary artifact.
 Current workers are spec-driven, so new tasks should report:

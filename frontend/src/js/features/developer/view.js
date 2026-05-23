@@ -16,7 +16,11 @@ export function activateDeveloperTabView(tabName = "model") {
 }
 
 export function openDeveloperDialogView() {
-  $("developer-dialog")?.showModal();
+  const dialog = $("developer-dialog");
+  if (!dialog || dialog.open) {
+    return;
+  }
+  dialog.showModal();
 }
 
 function revealDeveloperEntry() {

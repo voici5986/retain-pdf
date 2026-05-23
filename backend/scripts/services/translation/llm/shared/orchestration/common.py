@@ -110,7 +110,11 @@ def sentence_level_fallback_allowed(item: dict) -> bool:
     return not is_continuation_or_group_unit(item)
 
 
-def single_item_http_retry_attempts(item: dict) -> int | None:
+def single_item_http_retry_attempts(item: dict, *, context=None, transport_tail_retry: bool = False) -> int | None:
+    if context is not None:
+        if transport_tail_retry:
+            return max(1, int(context.fallback_policy.tail_http_retry_attempts))
+        return max(1, int(context.fallback_policy.main_http_retry_attempts))
     if is_direct_math_mode(item):
         return None
     if has_formula_placeholders(item) or is_continuation_or_group_unit(item):

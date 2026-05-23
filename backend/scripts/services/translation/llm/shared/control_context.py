@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from dataclasses import field
 from dataclasses import replace
 from collections.abc import Iterable
+from typing import Any
 
 from services.translation.artifacts import classify_provider_family
 from services.translation.core.terms import AbbreviationEntry
 from services.translation.core.terms import GlossaryEntry
 from services.translation.core.terms import build_terms_guidance
+from services.translation.core.terms import matched_abbreviation_entries
 from services.translation.core.terms import matched_glossary_entries
+from services.translation.llm.shared.tail_retry_queue import TransportTailRetryQueue
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,8 @@ class FallbackPolicy:
     allow_tagged_placeholder_retry: bool = True
     allow_keep_origin_degradation: bool = True
     transport_tail_retry_passes: int = 1
+    main_http_retry_attempts: int = 1
+    tail_http_retry_attempts: int = 2
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,10 @@ class TranslationControlContext:
     glossary_entries: list[GlossaryEntry] = field(default_factory=list)
     abbreviation_entries: list[AbbreviationEntry] = field(default_factory=list)
     retrieval_entries: list[RetrievalEvidence] = field(default_factory=list)
+    term_scope_source_text_count: int = 0
+    term_scope_glossary_total_count: int = 0
+    term_scope_abbreviation_total_count: int = 0
+    transport_tail_retry_queue: TransportTailRetryQueue | None = None
 
     @property
     def terms_guidance(self) -> str:
@@ -160,12 +169,52 @@ class TranslationControlContext:
 
     def scoped_to_source_texts(self, texts: Iterable[str]) -> "TranslationControlContext":
         text_list = [text for text in texts if text]
-        if not text_list or not self.glossary_entries:
+        if not text_list or not (self.glossary_entries or self.abbreviation_entries):
             return self
-        matched = matched_glossary_entries(self.glossary_entries, "\n".join(text_list))
-        if len(matched) == len(self.glossary_entries):
+        source_text = "\n".join(text_list)
+        matched_glossary = matched_glossary_entries(self.glossary_entries, source_text)
+        matched_abbreviations = matched_abbreviation_entries(self.abbreviation_entries, source_text)
+        if len(matched_glossary) == len(self.glossary_entries) and len(matched_abbreviations) == len(self.abbreviation_entries):
             return self
-        return replace(self, glossary_entries=matched)
+        return replace(
+            self,
+            glossary_entries=matched_glossary,
+            abbreviation_entries=matched_abbreviations,
+            term_scope_source_text_count=len(text_list),
+            term_scope_glossary_total_count=len(self.glossary_entries),
+            term_scope_abbreviation_total_count=len(self.abbreviation_entries),
+        )
+
+    def term_scope_summary_for_source_texts(self, texts: Iterable[str]) -> dict[str, Any]:
+        text_list = [text for text in texts if text]
+        scoped = self.scoped_to_source_texts(text_list)
+        source_text_count = scoped.term_scope_source_text_count
+        if source_text_count <= 0:
+            source_text_count = len(text_list)
+        glossary_total = scoped.term_scope_glossary_total_count or len(self.glossary_entries)
+        abbreviation_total = scoped.term_scope_abbreviation_total_count or len(self.abbreviation_entries)
+        return {
+            "source_text_count": source_text_count,
+            "glossary_total_count": glossary_total,
+            "glossary_matched_count": len(scoped.glossary_entries),
+            "glossary_sources": [entry.source for entry in scoped.glossary_entries],
+            "abbreviation_total_count": abbreviation_total,
+            "abbreviation_matched_count": len(scoped.abbreviation_entries),
+            "abbreviation_sources": [entry.source for entry in scoped.abbreviation_entries],
+        }
+
+    def term_scope_summary_for_item(self, item: dict) -> dict[str, Any]:
+        source_text = str(
+            item.get("source_text")
+            or item.get("raw_source_text")
+            or item.get("mixed_original_protected_source_text")
+            or item.get("translation_unit_original_source_text")
+            or item.get("translation_unit_protected_source_text")
+            or item.get("group_protected_source_text")
+            or item.get("protected_source_text")
+            or ""
+        )
+        return self.term_scope_summary_for_source_texts([source_text])
 
     def scoped_to_item(self, item: dict) -> "TranslationControlContext":
         source_text = str(
@@ -223,6 +272,7 @@ def build_translation_control_context(
         glossary_entries=list(glossary_entries or []),
         abbreviation_entries=list(abbreviation_entries or []),
         retrieval_entries=list(retrieval_entries or []),
+        transport_tail_retry_queue=TransportTailRetryQueue(),
     )
 
 
