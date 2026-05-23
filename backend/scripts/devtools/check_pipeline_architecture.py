@@ -102,13 +102,8 @@ TRANSLATION_LAYER_IMPORT_RULES: dict[str, tuple[str, ...]] = {
     "llm": (
         "services.translation.llm",
         "services.translation.core",
-        "services.translation.services.context",
         "services.translation.artifacts",
-        "services.translation.services.memory",
         "services.translation.core.payload",
-        "services.translation.services.policy",
-        "services.translation.services.quality",
-        "services.translation.services.terms",
     ),
     "services": (
         "services.translation.services",
@@ -119,9 +114,7 @@ TRANSLATION_LAYER_IMPORT_RULES: dict[str, tuple[str, ...]] = {
     ),
     "artifacts": (
         "services.translation.artifacts",
-        "services.translation.services.agents",
         "services.translation.core",
-        "services.translation.llm.shared.control_context",
         "services.translation.core.payload",
     ),
     "policy": (

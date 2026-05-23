@@ -125,15 +125,19 @@ services
 llm
   -> core / artifacts
 artifacts
-  -> core / llm control context
+  -> core
 ```
 
 当前仍有少量过渡例外：
 
-- `core/payload` 里还保留历史 policy/terms 辅助调用；后续触碰 payload 回填时应继续向纯数据构造收窄。
-- `llm` 里仍会读取 terms、memory、quality 的轻量辅助能力；新 provider 代码不要依赖这些 service。
 - `workflow/execution_runner.py` 会启动 render source prewarm，这是为了和翻译并行预热渲染输入，例外必须保持窄范围。
-- `artifacts/review.py` 仍会读取 reviewer/LLM 控制上下文来生成审查产物；不要把业务决策继续放进 artifacts。
+
+已经收口的边界：
+
+- `core` 只放纯 contract、数据读取、payload 数据操作和文本规则，不 import `services`、`workflow` 或 `llm`
+- `llm` 不再读取 `services/context`、`services/memory`、`services/quality`、`services/terms`
+- `artifacts` 不再读取 `services/agents` 或 LLM control context；review 摘要构造在 `services/agents/review_artifact.py`
+- `services` 可以组合 `core`、`llm` 和 `artifacts`，但不反向依赖 `workflow`
 
 当前兼容 shim：
 
@@ -141,17 +145,30 @@ artifacts
 - `translation/translate_only_pipeline.py` -> `translation/entrypoints/translate_only_pipeline.py`
 - `translation/item_reader.py` -> `translation/core/item_reader.py`
 - `translation/session_context.py` -> `translation/services/context/session_context.py`
+- `translation/services/context/models.py` -> `translation/core/context/models.py`
+- `translation/services/context/unit_context.py` -> `translation/core/context/unit_context.py`
+- `translation/services/terms/glossary.py` -> `translation/core/terms/glossary.py`
+- `translation/services/terms/abbreviations.py` -> `translation/core/terms/abbreviations.py`
+- `translation/services/terms/injection.py` -> `translation/core/terms/injection.py`
+- `translation/services/quality/checks.py` -> `translation/llm/validation/quality.py`
 
 这些 shim 是为了避免一次性改动外部 entrypoint、rendering 和历史脚本。translation 内部新代码不要再引用 shim，
 应直接引用真实路径。
 
 ### payload/parts 边界
 
-- `apply.py` 只保留翻译结果回填主流程。
-- `result_entries.py` 负责 result entry 归一化、metadata/diagnostics 提取和 reasoning leak 清理。
-- `group_split.py` 负责 continuation/group 翻译结果按成员切分，以及相关 token/math span 估算。
-- `result_status.py` 负责 `kept_origin` / `failed` 字段标记和 translation fields 清理。
-- `policy_state.py` 负责 policy 阶段的通用 skip/source-preserve 写字段。
+`core/payload/` 只保留 payload contract 和数据操作：
+
+- `manifest.py` 负责 translation manifest 读写协议。
+- `ops.py` 负责通用 payload 字段读写。
+- `translations.py` 负责翻译结果回填和状态字段。
+- `formula_protection.py` 负责 payload 内公式保护标记。
+- `template_contract.py`、`template_records.py`、`template_sync.py` 负责模板 contract、记录和同步。
+
+policy 相关 mutation/check/default/state 已迁到 `services/policy/payload_rules/`：
+
+- `policy_mutations.py`、`legacy_policy_mutations.py` 负责 policy 阶段写字段。
+- `policy_state.py` 负责 policy 阶段的通用 skip/source-preserve 状态。
 - `policy_defaults.py` 负责 reset 阶段的 foundational/default translatable 判定。
 - `legacy_policy_checks.py` 负责 legacy policy 中 CJK、引用条目、mixed literal 的纯判定。
 
