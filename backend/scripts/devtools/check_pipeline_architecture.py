@@ -338,19 +338,17 @@ RENDERING_LAYER_IMPORT_EXCEPTIONS: dict[Path, tuple[str, ...]] = {
 ENTRYPOINT_IMPORT_ALLOWLIST: dict[Path, tuple[str, ...]] = {
     Path("build_book.py"): ("from runtime.pipeline.book_pipeline import",),
     Path("build_page.py"): (
-        "from services.translation.core.ocr.json_extractor import",
+        "from services.translation.public import",
         "from services.rendering.legacy.pdf_overlay import",
         "from services.rendering.legacy.typst_page_renderer import",
-        "from services.translation.core.payload import",
     ),
     Path("diagnose_failure_with_ai.py"): (
-        "from services.translation.llm.shared.provider_runtime import",
-        "from services.translation.llm.shared.response_parsing import",
+        "from services.translation.public import",
     ),
     Path("run_book.py"): ("from services.translation.entrypoints.from_ocr_pipeline import main",),
     Path("run_document_flow.py"): (
         "from runtime.pipeline.book_pipeline import",
-        "from services.translation.llm.shared.provider_runtime import",
+        "from services.translation.public import",
     ),
     Path("run_normalize_ocr.py"): ("from services.document_schema.normalize_pipeline import main",),
     Path("run_provider_case.py"): ("from services.ocr_provider.provider_pipeline import main",),
@@ -360,9 +358,7 @@ ENTRYPOINT_IMPORT_ALLOWLIST: dict[Path, tuple[str, ...]] = {
     Path("run_translate_only.py"): ("from services.translation.entrypoints.translate_only_pipeline import main",),
     Path("translate_book.py"): ("from services.translation.entrypoints.translate_only_pipeline import main",),
     Path("translate_page.py"): (
-        "from services.translation.core.ocr.json_extractor import",
-        "from services.translation.llm.shared.provider_runtime import",
-        "from services.translation.workflow import",
+        "from services.translation.public import",
     ),
     Path("validate_document_schema.py"): ("from services.document_schema import",),
 }

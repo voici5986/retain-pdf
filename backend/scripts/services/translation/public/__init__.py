@@ -38,6 +38,7 @@ _EXPORTS = {
     "load_translation_manifest": ("services.translation.core.payload", "load_translation_manifest"),
     "load_translation_manifest_file": ("services.translation.core.payload", "load_translation_manifest_file"),
     "load_translations": ("services.translation.core.payload", "load_translations"),
+    "ensure_translation_template": ("services.translation.core.payload", "ensure_translation_template"),
     "PROTECTED_TOKEN_RE": ("services.translation.core.payload", "PROTECTED_TOKEN_RE"),
     "re_protect_restored_formulas": ("services.translation.core.payload", "re_protect_restored_formulas"),
     "restore_protected_tokens": ("services.translation.core.payload", "restore_protected_tokens"),
@@ -49,13 +50,17 @@ _EXPORTS = {
     ),
     "GlossaryEntry": ("services.translation.core.terms", "GlossaryEntry"),
     "parse_glossary_json": ("services.translation.core.terms", "parse_glossary_json"),
+    "extract_text_items": ("services.translation.core.ocr.json_extractor", "extract_text_items"),
+    "load_ocr_json": ("services.translation.core.ocr.json_extractor", "load_ocr_json"),
     "DEFAULT_BASE_URL": ("services.translation.llm.shared.provider_runtime", "DEFAULT_BASE_URL"),
     "DEFAULT_MODEL": ("services.translation.llm.shared.provider_runtime", "DEFAULT_MODEL"),
     "get_api_key": ("services.translation.llm.shared.provider_runtime", "get_api_key"),
     "normalize_base_url": ("services.translation.llm.shared.provider_runtime", "normalize_base_url"),
     "request_chat_content": ("services.translation.llm.shared.provider_runtime", "request_chat_content"),
+    "extract_json_text": ("services.translation.llm.shared.response_parsing", "extract_json_text"),
     "TranslationExecutionRequest": ("services.translation.workflow", "TranslationExecutionRequest"),
     "execute_translation_request": ("services.translation.workflow", "execute_translation_request"),
+    "translate_items_to_path": ("services.translation.workflow", "translate_items_to_path"),
 }
 
 __all__ = list(_EXPORTS)

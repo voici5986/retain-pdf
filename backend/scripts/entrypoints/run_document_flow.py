@@ -13,10 +13,10 @@ from foundation.config import layout
 from foundation.config import paths
 from foundation.config import runtime
 from runtime.pipeline.book_pipeline import run_book_pipeline
-from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL
-from services.translation.llm.shared.provider_runtime import DEFAULT_MODEL
-from services.translation.llm.shared.provider_runtime import get_api_key
-from services.translation.llm.shared.provider_runtime import normalize_base_url
+from services.translation.public import DEFAULT_BASE_URL
+from services.translation.public import DEFAULT_MODEL
+from services.translation.public import get_api_key
+from services.translation.public import normalize_base_url
 
 
 def parse_args() -> argparse.Namespace:

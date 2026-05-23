@@ -7,12 +7,12 @@ import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL
-from services.translation.llm.shared.provider_runtime import DEFAULT_MODEL
-from services.translation.llm.shared.provider_runtime import get_api_key
-from services.translation.llm.shared.provider_runtime import normalize_base_url
-from services.translation.llm.shared.provider_runtime import request_chat_content
-from services.translation.llm.shared.response_parsing import extract_json_text
+from services.translation.public import DEFAULT_BASE_URL
+from services.translation.public import DEFAULT_MODEL
+from services.translation.public import get_api_key
+from services.translation.public import normalize_base_url
+from services.translation.public import request_chat_content
+from services.translation.public import extract_json_text
 
 
 def parse_args() -> argparse.Namespace:
