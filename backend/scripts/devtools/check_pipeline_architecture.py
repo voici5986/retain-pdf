@@ -13,6 +13,8 @@ SCRIPTS_ROOT = REPO_ROOT / "backend" / "scripts"
 PIPELINE_ROOT = SCRIPTS_ROOT / "runtime" / "pipeline"
 ENTRYPOINTS_ROOT = SCRIPTS_ROOT / "entrypoints"
 OCR_PROVIDER_ROOT = SCRIPTS_ROOT / "services" / "ocr_provider"
+MINERU_ROOT = SCRIPTS_ROOT / "services" / "mineru"
+DOCUMENT_SCHEMA_ROOT = SCRIPTS_ROOT / "services" / "document_schema"
 TRANSLATION_ROOT = SCRIPTS_ROOT / "services" / "translation"
 RENDERING_ROOT = SCRIPTS_ROOT / "services" / "rendering"
 STAGE_SPEC_CONTRACT_CHECK = SCRIPTS_ROOT / "devtools" / "check_stage_specs_contract.py"
@@ -624,6 +626,8 @@ def check_translation_public_surface_usage(errors: list[str]) -> None:
     guarded_roots = (
         PIPELINE_ROOT,
         OCR_PROVIDER_ROOT,
+        MINERU_ROOT,
+        DOCUMENT_SCHEMA_ROOT,
         RENDERING_ROOT,
     )
     allowed_prefixes = (

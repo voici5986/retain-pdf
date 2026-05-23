@@ -19,10 +19,10 @@ from services.pipeline_shared.summary import print_pipeline_summary
 from services.pipeline_shared.summary import write_pipeline_summary
 from services.pipeline_shared.source_json import resolve_translation_source_json_path
 from runtime.pipeline.book_pipeline import run_book_pipeline
-from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL
-from services.translation.llm.shared.provider_runtime import get_api_key
-from services.translation.llm.shared.provider_runtime import normalize_base_url
-from services.translation.services.terms import parse_glossary_json
+from services.translation.public import DEFAULT_BASE_URL
+from services.translation.public import get_api_key
+from services.translation.public import normalize_base_url
+from services.translation.public import parse_glossary_json
 
 
 def parse_args() -> argparse.Namespace:

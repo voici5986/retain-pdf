@@ -40,6 +40,7 @@ _EXPORTS = {
     "load_translations": ("services.translation.core.payload", "load_translations"),
     "ensure_translation_template": ("services.translation.core.payload", "ensure_translation_template"),
     "PROTECTED_TOKEN_RE": ("services.translation.core.payload", "PROTECTED_TOKEN_RE"),
+    "protect_inline_formulas": ("services.translation.core.payload", "protect_inline_formulas"),
     "re_protect_restored_formulas": ("services.translation.core.payload", "re_protect_restored_formulas"),
     "restore_protected_tokens": ("services.translation.core.payload", "restore_protected_tokens"),
     "TRANSLATION_MANIFEST_FILE_NAME": ("services.translation.core.payload", "TRANSLATION_MANIFEST_FILE_NAME"),

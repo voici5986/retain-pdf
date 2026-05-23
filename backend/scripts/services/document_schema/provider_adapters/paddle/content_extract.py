@@ -5,8 +5,8 @@ import re
 
 from services.document_schema.provider_adapters.common import build_line_records
 from services.document_schema.provider_adapters.common import build_text_segments
-from services.translation.core.payload.formula_protection import protect_inline_formulas
-from services.translation.core.payload.formula_protection import PROTECTED_TOKEN_RE
+from services.translation.public import protect_inline_formulas
+from services.translation.public import PROTECTED_TOKEN_RE
 
 APPROX_TEXT_CHAR_WIDTH_PT = 5.2
 MIN_PSEUDO_LINE_PITCH_PT = 11.0
