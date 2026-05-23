@@ -17,9 +17,9 @@ from services.translation.llm.validation.errors import TranslationProtocolError
 from services.translation.llm.validation.errors import UnexpectedPlaceholderError
 from services.translation.core.text_rules import looks_like_code_literal_text_value
 from services.translation.core.text_rules import looks_like_url_fragment
-from services.translation.services.quality import TranslationQualityIssue
-from services.translation.services.quality import review_translation_item
-from services.translation.services.quality import should_reject_keep_origin
+from services.translation.llm.validation.quality import TranslationQualityIssue
+from services.translation.llm.validation.quality import review_translation_item
+from services.translation.llm.validation.quality import should_reject_keep_origin
 
 
 @dataclass(frozen=True)
