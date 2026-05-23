@@ -972,6 +972,21 @@ def check_translation_internal_boundaries(errors: list[str]) -> None:
                 f"services/translation/{path.name}: unexpected translation root file; place new code inside entrypoints/workflow/core/services/llm/artifacts."
             )
 
+    public_init = TRANSLATION_ROOT / "public" / "__init__.py"
+    public_text = read_text(public_init)
+    forbidden_public_eager_imports = (
+        "from services.translation.",
+        "import services.translation.",
+        "from services.rendering",
+        "import services.rendering",
+    )
+    for item in forbidden_public_eager_imports:
+        if item in public_text:
+            errors.append(
+                f"{rel(public_init)}: public facade must stay lazy; register exports in _EXPORTS instead of eager import '{item}'"
+            )
+            break
+
     forbidden_runtime_imports = (
         "from runtime.pipeline",
         "import runtime.pipeline",
