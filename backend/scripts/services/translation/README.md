@@ -119,7 +119,15 @@ production 代码在 translation 外部引用本模块时，默认只允许：
 - `services.translation.entrypoints.*`
   CLI/worker 入口脚本使用。
 
-`runtime/pipeline/**`、`services/rendering/**`、`services/ocr_provider/**` 不应直接 import：
+以下 production 目录不应直接 import translation 内部实现：
+
+- `runtime/pipeline/**`
+- `services/rendering/**`
+- `services/ocr_provider/**`
+- `services/mineru/**`
+- `services/document_schema/**`
+
+这些目录禁止直接引用：
 
 - `services.translation.core`
 - `services.translation.services`
@@ -128,6 +136,22 @@ production 代码在 translation 外部引用本模块时，默认只允许：
 - `services.translation.artifacts`
 
 如果这些外部模块确实需要新的 translation 能力，先把它设计成稳定 contract 后加到 `public/`，再由外部调用。
+
+`public/` 必须保持 lazy facade：不要在 `services/translation/public/__init__.py` 顶层写
+`from services.translation... import ...` 或 `from services.rendering... import ...`。新增导出时只登记到
+`_EXPORTS`，由 `__getattr__` 按需加载，避免 translation 和 rendering 之间重新形成 import cycle。
+
+### Devtools 与测试例外
+
+`backend/scripts/devtools/**` 和 `backend/scripts/devtools/tests/**` 可以直接 import translation 内部模块，用来做：
+
+- 单元测试内部规则、payload helper、LLM 协议和 policy 分支
+- replay / promptfoo / repair runner 这类调试工具
+- golden flow 或 schema 回归检查
+
+这些是 debug/test-only 例外，不代表 production 代码可以照抄。新增普通运行链路、worker、OCR/normalize、rendering 或 runtime 代码时，
+默认仍必须走 `services.translation.public`。如果某个 devtools 脚本将来会被 production 调用，应先把它需要的 translation 能力收口到
+`public/`，再接入主链。
 
 ### 依赖方向
 
@@ -203,6 +227,15 @@ policy 相关 mutation/check/default/state 已迁到 `services/policy/payload_ru
 - `translation/**` 整体不应 import `services.rendering`。
 
 这些规则由 `backend/scripts/devtools/check_pipeline_architecture.py` 逐步收紧。当前先卡住新增越界依赖，历史兼容入口会分批迁移。
+
+当前架构门禁已经覆盖：
+
+- translation 根目录只允许包初始化和 README，不允许新增根部大文件
+- production 外部目录只能通过 `services.translation.public` 使用 translation contract
+- `public/` 必须保持 lazy export，避免 eager import 拉起 workflow/rendering
+- 已删除 shim 路径不可再引用
+- translation 内部不得直接 import `runtime.pipeline`
+- translation 整体不得直接 import `services.rendering`，唯一窄例外是 `workflow/execution_runner.py` 的 render source prewarm
 
 ## 主要流程
 
