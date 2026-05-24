@@ -6,12 +6,12 @@ import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Callable
 
 from foundation.config import paths
 from foundation.shared.prompt_loader import load_prompt
 from services.translation.core.item_reader import item_raw_block_type
 from services.translation.core.item_reader import item_structure_role
-from services.translation.llm.shared.provider_runtime import request_chat_content
 from services.translation.services.policy.soft_hints import build_soft_rule_hints
 from services.translation.services.policy.soft_hints import extract_command_prefix
 from services.translation.services.policy.soft_hints import extract_line_texts
@@ -95,8 +95,9 @@ def _decide_single_item(
     base_url: str,
     request_label: str,
     rule_guidance: str,
+    request_chat_content_fn: Callable[..., str],
 ) -> tuple[str, str]:
-    content = request_chat_content(
+    content = request_chat_content_fn(
         _build_messages(item, rule_guidance=rule_guidance),
         api_key=api_key,
         model=model,
@@ -191,6 +192,7 @@ def split_mixed_literal_items(
     base_url: str,
     workers: int = 1,
     rule_guidance: str = "",
+    request_chat_content_fn: Callable[..., str] | None = None,
 ) -> dict[str, tuple[str, str]]:
     if not items:
         return {}
@@ -213,6 +215,17 @@ def split_mixed_literal_items(
                 prefix=local[1],
             )
             return item_id, local
+        if request_chat_content_fn is None:
+            decision = _fallback_decision(item)
+            _store_cached_decision(
+                item,
+                model=model,
+                base_url=base_url,
+                rule_guidance=rule_guidance,
+                action=decision[0],
+                prefix=decision[1],
+            )
+            return item_id, decision
         try:
             decision = _decide_single_item(
                 item,
@@ -221,6 +234,7 @@ def split_mixed_literal_items(
                 base_url=base_url,
                 request_label=f"mixed-split {item_id}",
                 rule_guidance=rule_guidance,
+                request_chat_content_fn=request_chat_content_fn,
             )
         except Exception:
             decision = _fallback_decision(item)

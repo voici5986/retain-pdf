@@ -10,6 +10,7 @@ from services.translation.core.orchestration.zones import annotate_payload_layou
 from services.translation.services.continuation.pairs import apply_candidate_pair_joins
 from services.translation.services.continuation.pairs import candidate_continuation_pairs
 from services.translation.services.continuation.review import review_candidate_pairs
+from services.translation.services.continuation.rules import is_reading_boundary_cross_column_pair
 from services.translation.services.continuation.rules import pair_break_score
 from services.translation.services.continuation.rules import pair_join_score
 
@@ -44,7 +45,8 @@ def _filter_boundary_candidate_pairs(flat_payload: list[dict], pairs: list[dict]
             boundary_pairs.append(pair)
             continue
         if prev_zone != next_zone:
-            boundary_pairs.append(pair)
+            if is_reading_boundary_cross_column_pair(prev_item, next_item) or pair_join_score(prev_item, next_item) >= 0:
+                boundary_pairs.append(pair)
             continue
         if _is_boundary_role(prev_role) or _is_boundary_role(next_role):
             boundary_pairs.append(pair)
@@ -60,7 +62,8 @@ def review_candidate_continuation_pairs(
     base_url: str,
     workers: int,
     save_pages_fn,
-    batch_size: int = 3,
+    batch_size: int = 24,
+    request_chat_content_fn: Callable[..., str],
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> int:
     flat_payload = [item for page_idx in sorted(page_payloads) for item in page_payloads[page_idx]]
@@ -106,6 +109,7 @@ def review_candidate_continuation_pairs(
             model=model,
             base_url=base_url,
             request_label=f"continuation-review {index}/{len(batches)}",
+            request_chat_content_fn=request_chat_content_fn,
         )
         pair_map = {pair["pair_id"]: pair for pair in labeled_pairs}
         return [

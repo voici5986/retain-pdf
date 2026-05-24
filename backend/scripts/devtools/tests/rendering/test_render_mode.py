@@ -40,7 +40,7 @@ def test_auto_render_mode_uses_visual_typst_for_non_editable_pdf(monkeypatch, tm
     assert mode == "typst_visual"
 
 
-def test_auto_render_mode_uses_background_typst_for_editable_pdf(monkeypatch, tmp_path) -> None:
+def test_auto_render_mode_uses_overlay_for_editable_pdf(monkeypatch, tmp_path) -> None:
     source_pdf = tmp_path / "editable.pdf"
     source_pdf.write_bytes(b"%PDF-1.7\n")
 
@@ -55,7 +55,7 @@ def test_auto_render_mode_uses_background_typst_for_editable_pdf(monkeypatch, tm
         translated_pages_map={0: [{"source_text": "hello world", "bbox": [0, 0, 10, 10]}]},
     )
 
-    assert mode == "typst"
+    assert mode == "overlay"
 
 
 def test_explicit_overlay_render_mode_is_still_supported(tmp_path) -> None:

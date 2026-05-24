@@ -99,6 +99,7 @@ def run_selected_pages_overlay_render(
         effective_inner_bbox_lookup=context.effective_inner_bbox_lookup,
         source_text_precleaned_page_indices=remapped_precleaned_pages,
         source_cleanup_strategy=context.source_cleanup_strategy,
+        precomputed_colors_by_item_id=context.render_colors_by_item_id,
     )
     final_compressed = _compress_final_pdf_if_needed(context, mode="selected_pages_overlay")
     diagnostics = dict(overlay_diagnostics)
@@ -128,6 +129,7 @@ def run_overlay_render(
         effective_inner_bbox_lookup=context.effective_inner_bbox_lookup,
         source_text_precleaned_page_indices=context.source_text_precleaned_page_indices,
         source_cleanup_strategy=context.source_cleanup_strategy,
+        precomputed_colors_by_item_id=context.render_colors_by_item_id,
     )
     final_compressed = _compress_final_pdf_if_needed(context, mode="overlay")
     diagnostics = dict(overlay_diagnostics)
@@ -160,6 +162,8 @@ def run_background_typst_render(
         first_line_indent_lookup=context.first_line_indent_lookup,
         effective_inner_bbox_lookup=context.effective_inner_bbox_lookup,
         source_text_precleaned_page_indices=context.source_text_precleaned_page_indices,
+        prebuilt_page_specs=context.background_render_page_specs,
+        precomputed_colors_by_item_id=context.render_colors_by_item_id,
     )
     mode = "typst_visual" if visual_only_background else "typst"
     final_compressed = _compress_final_pdf_if_needed(context, mode=mode)

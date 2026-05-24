@@ -5,7 +5,6 @@ import {
   renderRecentJobsList,
   renderRecentJobsLoading,
   renderRecentJobsSummary,
-  setRecentJobsDateValue,
   setRecentJobsLoadMoreLoading,
   setRecentJobsOpen,
 } from "./recent-jobs-dialog-rendering.js";
@@ -36,10 +35,6 @@ class RecentJobsDialog extends HTMLElement {
     return recentJobsElements(this).loadMoreButton;
   }
 
-  dateInput() {
-    return recentJobsElements(this).dateInput;
-  }
-
   dialogElement() {
     return recentJobsElements(this).dialog;
   }
@@ -48,16 +43,8 @@ class RecentJobsDialog extends HTMLElement {
     setRecentJobsOpen(this, open);
   }
 
-  setDateValue(value) {
-    setRecentJobsDateValue(this, value);
-  }
-
-  bindEvents({ onRefresh, onLoadMore, onDateChange } = {}) {
-    this.querySelector("#refresh-jobs-btn")?.addEventListener("click", () => onRefresh?.());
+  bindEvents({ onLoadMore } = {}) {
     this.loadMoreButton()?.addEventListener("click", () => onLoadMore?.());
-    this.dateInput()?.addEventListener("change", (event) => {
-      onDateChange?.(event.currentTarget?.value || "");
-    });
   }
 
   renderSummary(text) {

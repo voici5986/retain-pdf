@@ -46,6 +46,20 @@ export function eventIdentity(item = {}) {
   };
 }
 
+export function normalizeUserStage(value = "") {
+  const stage = `${value || ""}`.trim().toLowerCase();
+  return stage === "translation" ? "translate" : stage;
+}
+
+export function progressUnitOf(payload = {}) {
+  const nestedPayload = payload?.payload && typeof payload.payload === "object" ? payload.payload : {};
+  return `${payload?.progress_unit
+    || payload?.progress?.unit
+    || nestedPayload.progress_unit
+    || nestedPayload.progress?.unit
+    || ""}`.trim().toLowerCase();
+}
+
 export function compareProgressEventOrder(previous, next) {
   if (!previous) {
     return 1;

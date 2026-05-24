@@ -311,6 +311,7 @@ pub fn job_to_detail(
             current: job.progress_current,
             total: job.progress_total,
             percent,
+            unit: None,
         },
         timestamps: JobTimestampsView {
             created_at: job.created_at.clone(),
@@ -389,6 +390,7 @@ pub fn job_to_list_item(
                 }
                 _ => None,
             },
+            unit: None,
         },
         page_count: job
             .artifacts

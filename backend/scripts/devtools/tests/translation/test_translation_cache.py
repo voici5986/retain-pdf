@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import json
 
 
 REPO_SCRIPTS_ROOT = Path(__file__).resolve().parents[3]
@@ -84,3 +85,39 @@ def test_translation_cache_key_includes_policy_version(monkeypatch) -> None:
     )
 
     assert before != after
+
+
+def test_translation_cache_sanitizes_reasoning_leak_on_load(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(cache.paths, "TRANSLATION_UNIT_CACHE_DIR", tmp_path)
+    item = {
+        "item_id": "p135-b009",
+        "translation_unit_protected_source_text": "The time-ordered response has to be distinguished from the retarded response function,",
+    }
+    cache_key = cache.cache_key_for_item(
+        item,
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com/v1",
+        mode="sci",
+    )
+    path = tmp_path / cache_key[:2] / f"{cache_key}.json"
+    path.parent.mkdir(parents=True)
+    leaked = (
+        '函数需要加"函数"吗？为保准确，可以译为"时间有序响应（函数）必须与推迟响应函数加以区分"。'
+        '更简洁：直接"时间有序响应必须与推迟响应函数加以区分"。'
+        '我选择："时间有序响应必须与推迟响应函数加以区分，"'
+    )
+    path.write_text(
+        json.dumps({"cache_key": cache_key, "decision": "translate", "translated_text": leaked}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = cache.load_cached_translation(
+        item,
+        model="deepseek-v4-flash",
+        base_url="https://api.deepseek.com/v1",
+        mode="sci",
+    )
+    healed = json.loads(path.read_text(encoding="utf-8"))
+
+    assert result["translated_text"] == "时间有序响应必须与推迟响应函数加以区分，"
+    assert healed["translated_text"] == "时间有序响应必须与推迟响应函数加以区分，"

@@ -1,7 +1,6 @@
 import {
   getRecentJobsState,
   resetRecentJobsPagination,
-  setRecentJobsDate,
   setRecentJobsHasMore,
   setRecentJobsItems,
   setRecentJobsOffset,
@@ -13,33 +12,11 @@ import {
   renderRecentJobsError,
   renderRecentJobsList,
   renderRecentJobsLoading,
-  setRecentJobsDateInput,
   setRecentJobsDialogOpen,
   setRecentJobsLoadMoreLoading,
 } from "./view.js";
 
-function padDatePart(value) {
-  return `${value}`.padStart(2, "0");
-}
-
-function formatDateKey(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
-}
-
-function recentJobDateKey(value) {
-  const raw = `${value || ""}`.trim();
-  if (!raw) {
-    return "";
-  }
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) {
-    return "";
-  }
-  return formatDateKey(parsed);
-}
+const RECENT_JOBS_PAGE_SIZE = 10;
 
 function dedupeRecentJobs(items) {
   const seen = new Set();
@@ -67,7 +44,7 @@ function isPrimaryRecentJob(item) {
   return true;
 }
 
-async function collectRecentJobsPage(fetchJobList, fetchLibraryBookList, apiPrefix, startOffset, selectedDate, pageSize) {
+async function collectRecentJobsPage(fetchJobList, fetchLibraryBookList, apiPrefix, startOffset, pageSize) {
   const fetchLimit = Math.max(pageSize, 20);
   const collected = [];
   let latestInvocationSummary = null;
@@ -90,19 +67,6 @@ async function collectRecentJobsPage(fetchJobList, fetchLibraryBookList, apiPref
       consumed += 1;
       if (!isPrimaryRecentJob(item)) {
         continue;
-      }
-      const dateKey = recentJobDateKey(item.updated_at || item.created_at);
-      if (!dateKey) {
-        continue;
-      }
-      if (selectedDate) {
-        if (dateKey > selectedDate) {
-          continue;
-        }
-        if (dateKey < selectedDate) {
-          hasMore = false;
-          break;
-        }
       }
       collected.push(item);
       if (collected.length >= pageSize) {
@@ -194,9 +158,7 @@ export function mountRecentJobsFeature({ fetchJobList, fetchLibraryBookList, del
     }
 
     try {
-      const { date, offset, items: previousItems } = getRecentJobsState();
-      const selectedDate = `${date || ""}`.trim();
-      const pageSize = 24;
+      const { offset, items: previousItems } = getRecentJobsState();
       const {
         collected,
         hasMore,
@@ -207,14 +169,13 @@ export function mountRecentJobsFeature({ fetchJobList, fetchLibraryBookList, del
         fetchLibraryBookList,
         apiPrefix,
         reset ? 0 : offset,
-        selectedDate,
-        pageSize,
+        RECENT_JOBS_PAGE_SIZE,
       );
 
       if (reset && collected.length === 0) {
         setRecentJobsItems([]);
         setRecentJobsHasMore(false);
-        renderRecentJobsEmpty(selectedDate ? "所选日期暂无任务" : "暂无最近任务", latestInvocationSummary);
+        renderRecentJobsEmpty("暂无最近任务", latestInvocationSummary);
         return;
       }
       if (!reset && collected.length === 0) {
@@ -245,7 +206,6 @@ export function mountRecentJobsFeature({ fetchJobList, fetchLibraryBookList, del
   }
 
   function openRecentJobsDialog() {
-    setRecentJobsDateInput(getRecentJobsState().date);
     loadRecentJobs({ reset: true });
     setRecentJobsDialogOpen(true);
   }
@@ -256,12 +216,7 @@ export function mountRecentJobsFeature({ fetchJobList, fetchLibraryBookList, del
 
   bindRecentJobsEvents({
     onOpen: openRecentJobsDialog,
-    onRefresh: () => loadRecentJobs({ reset: true }),
     onLoadMore: () => loadRecentJobs({ reset: false }),
-    onDateChange(value) {
-      setRecentJobsDate(value || "");
-      loadRecentJobs({ reset: true });
-    },
   });
 
   return {

@@ -94,10 +94,24 @@ def classify_text_flow(*, text: str, lines: object) -> str:
     return TEXT_FLOW_PRESERVE_LINES if looks_like_preserved_line_flow(text=text, lines=lines) else TEXT_FLOW_FLOW
 
 
+def classify_text_flow_for_role(*, text: str, lines: object, semantic_role: str = "", structure_role: str = "") -> str:
+    role = str(semantic_role or "").strip().lower()
+    structure = str(structure_role or "").strip().lower()
+    if structure == "table_of_contents":
+        return TEXT_FLOW_PRESERVE_LINES
+    if role in {"body", "abstract"}:
+        return TEXT_FLOW_FLOW
+    explicit_lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if len(explicit_lines) >= 3:
+        return TEXT_FLOW_PRESERVE_LINES
+    return classify_text_flow(text=text, lines=lines)
+
+
 __all__ = [
     "TEXT_FLOW_FLOW",
     "TEXT_FLOW_PRESERVE_LINES",
     "classify_text_flow",
+    "classify_text_flow_for_role",
     "line_geometry_is_regular",
     "line_text",
     "line_texts_from_lines",

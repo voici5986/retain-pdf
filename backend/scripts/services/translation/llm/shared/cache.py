@@ -10,6 +10,7 @@ from pathlib import Path
 from foundation.shared.prompt_loader import load_prompt
 from foundation.config import paths
 
+from services.translation.core.payload.parts.result_entries import with_sanitized_translation
 from services.translation.llm.shared.provider_runtime import extract_single_item_translation_text
 from services.translation.llm.shared.provider_runtime import normalize_base_url
 
@@ -18,7 +19,7 @@ _PROMPT_HASHES: dict[str, str] = {}
 _CACHE_LOCK = threading.Lock()
 FORMULA_SEGMENT_STRATEGY_VERSION = "formula_segments_v2"
 PLAIN_TEXT_STRATEGY_VERSION = "plain_text_v2"
-TRANSLATION_PROTOCOL_VERSION = "translation_control_v4_structured_technical_context"
+TRANSLATION_PROTOCOL_VERSION = "translation_control_v5_no_reasoning_content"
 TRANSLATION_POLICY_VERSION = "policy_hints_v2_memory_context_v1"
 UNESCAPED_INLINE_DOLLAR_RE = re.compile(r"(?<!\\)\$")
 TRANSLATION_PROMPT_FILES = (
@@ -104,6 +105,11 @@ def _cache_path(cache_key: str) -> Path:
     return paths.TRANSLATION_UNIT_CACHE_DIR / cache_key[:2] / f"{cache_key}.json"
 
 
+def _sanitize_cached_translation_text(text: str) -> tuple[str, bool]:
+    sanitized, metadata = with_sanitized_translation(str(text or "").strip(), {})
+    return sanitized, bool(metadata)
+
+
 def load_cached_translation(
     item: dict,
     *,
@@ -133,9 +139,10 @@ def load_cached_translation(
     decision = str(payload.get("decision", "translate") or "translate").strip() or "translate"
     raw_translated_text = str(payload.get("translated_text", "") or "").strip()
     translated_text = extract_single_item_translation_text(raw_translated_text, str(item.get("item_id", "") or ""))
+    translated_text, sanitized = _sanitize_cached_translation_text(translated_text)
     if str(item.get("math_mode", "") or "").strip() == "direct_typst" and translated_text and not _has_balanced_inline_math_delimiters(translated_text):
         return {}
-    if translated_text != raw_translated_text:
+    if translated_text != raw_translated_text or sanitized:
         healed_payload = {
             "cache_key": cache_key,
             "decision": decision,
@@ -165,6 +172,7 @@ def store_cached_translation(
     decision = str(translation_result.get("decision", "translate") or "translate").strip() or "translate"
     translated_text = str(translation_result.get("translated_text", "") or "").strip()
     translated_text = extract_single_item_translation_text(translated_text, str(item.get("item_id", "") or ""))
+    translated_text, _sanitized = _sanitize_cached_translation_text(translated_text)
     if not translated_text and decision != "keep_origin":
         return
     cache_key = cache_key_for_item(

@@ -6,6 +6,7 @@ from statistics import median
 from services.rendering.layout.payload.body_common import body_context_anchors
 from services.rendering.layout.payload.body_common import is_body_context_text_payload
 from services.rendering.layout.payload.body_common import payload_density
+from services.rendering.layout.payload.body_common import payload_is_continuation_member
 from services.rendering.layout.payload.body_common import required_lines
 from services.rendering.layout.payload.body_common import same_body_column
 from services.rendering.layout.typography.measurement import source_visual_line_count
@@ -130,6 +131,8 @@ def _page_font_target(body_payloads: list[dict], body_font_median: float, *, pag
 
 
 def _is_underfilled_growth_candidate(payload: dict) -> bool:
+    if payload_is_continuation_member(payload):
+        return False
     if payload["dense_small_box"] or payload["heavy_dense_small_box"]:
         return False
     if payload["render_kind"] != "markdown" or payload["prefer_typst_fit"]:

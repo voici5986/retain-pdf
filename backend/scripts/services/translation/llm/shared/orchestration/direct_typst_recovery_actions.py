@@ -196,20 +196,6 @@ def handle_raw_transport_failure(
             f"{request_label}: direct_typst raw transport failure after {time.perf_counter() - raw_started:.2f}s, mark failed: {type(raw_exc).__name__}: {raw_exc}",
             flush=True,
         )
-    if should_force_translate_body_text(item) and sentence_level_fallback_allowed(item):
-        return sentence_level_fallback_or_terminal_failure(
-            item,
-            api_key=api_key,
-            model=model,
-            base_url=base_url,
-            request_label=request_label,
-            context=context,
-            diagnostics=diagnostics,
-            route_path=route_prefix + ["plain_text_raw", "failed"],
-            translate_plain=translate_plain,
-            translate_unstructured=translate_unstructured,
-            sentence_level_fallback_fn=sentence_level_fallback_fn,
-        ), raw_exc
     if allow_transport_tail_defer:
         defer_transport_retry(
             item,

@@ -18,7 +18,8 @@ MAX_FONT_SIZE_PT = 11.6
 MAX_LOCAL_FONT_SIZE_PT = 14.2
 LOCAL_BLOCK_SCALE_MIN = 0.97
 LOCAL_BLOCK_SCALE_MAX = 1.03
-CAPTION_FONT_SCALE = 0.92
+CAPTION_FONT_SCALE = 0.86
+CAPTION_MAX_FONT_SIZE_PT = 10.0
 FOOTNOTE_FONT_SCALE = 0.78
 FOOTNOTE_MIN_FONT_SIZE_PT = 6.6
 BODY_PAGE_BLEND_BASE = 0.86
@@ -38,7 +39,7 @@ def local_font_size_pt(item: dict) -> float:
     if is_footnote_like_block(item):
         return round(clamp(base_size * FOOTNOTE_FONT_SCALE, FOOTNOTE_MIN_FONT_SIZE_PT, MAX_LOCAL_FONT_SIZE_PT), 2)
     if is_caption_like_block(item):
-        return round(clamp(base_size * CAPTION_FONT_SCALE, MIN_FONT_SIZE_PT, MAX_LOCAL_FONT_SIZE_PT), 2)
+        return round(clamp(base_size * CAPTION_FONT_SCALE, MIN_FONT_SIZE_PT, CAPTION_MAX_FONT_SIZE_PT), 2)
     return round(clamp(base_size, MIN_FONT_SIZE_PT, MAX_LOCAL_FONT_SIZE_PT), 2)
 
 
@@ -82,6 +83,7 @@ __all__ = [
     "BODY_COMPACT_FONT_SCALE_MAX",
     "BODY_PAGE_BLEND_BASE",
     "BODY_PAGE_BLEND_MIN",
+    "CAPTION_MAX_FONT_SIZE_PT",
     "CAPTION_FONT_SCALE",
     "FOOTNOTE_FONT_SCALE",
     "FOOTNOTE_MIN_FONT_SIZE_PT",

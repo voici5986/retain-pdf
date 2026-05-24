@@ -4,7 +4,6 @@ export function getRecentJobsState() {
   return {
     offset: state.recentJobsOffset,
     hasMore: state.recentJobsHasMore,
-    date: state.recentJobsDate,
     items: state.recentJobsItems,
   };
 }
@@ -15,10 +14,6 @@ export function setRecentJobsOffset(value) {
 
 export function setRecentJobsHasMore(value) {
   state.recentJobsHasMore = Boolean(value);
-}
-
-export function setRecentJobsDate(value) {
-  state.recentJobsDate = `${value || ""}`.trim();
 }
 
 export function setRecentJobsItems(items) {

@@ -18,6 +18,8 @@ pub struct JobProgressView {
     pub current: Option<i64>,
     pub total: Option<i64>,
     pub percent: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

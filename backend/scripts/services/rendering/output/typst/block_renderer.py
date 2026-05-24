@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from services.rendering.layout.model.models import RenderBlock
+from services.rendering.layout.inline_content.core.markdown import build_direct_typst_passthrough_text
 from services.rendering.output.typst.block_fit import fit_dimensions
 from services.rendering.output.typst import block_config as typst_config
 from services.rendering.output.typst.block_fields import typst_block_fields
@@ -17,6 +18,44 @@ from services.rendering.output.typst.block_markup import typst_single_line_fit_c
 from services.rendering.output.typst.shared import escape_typst_string
 
 PLAIN_LINE_FIT_MAX_CHARS = 40
+TOC_ENTRY_FONT_PT = 9.6
+TOC_ENTRY_MIN_FONT_PT = 6.8
+TOC_PAGE_COLUMN_MIN_PT = 20.0
+TOC_PAGE_COLUMN_MAX_PT = 36.0
+TOC_TITLE_PAGE_GAP_PT = 4.0
+TOC_LEADER_DOT_WIDTH_RATIO = 0.26
+
+
+def _toc_text_units(text: str) -> float:
+    units = 0.0
+    for char in str(text or ""):
+        if char.isspace():
+            units += 0.35
+        elif "\u4e00" <= char <= "\u9fff":
+            units += 1.08
+        elif char.isascii() and char.isalnum():
+            units += 0.62
+        elif char == ".":
+            units += 0.34
+        else:
+            units += 0.56
+    return units
+
+
+def _toc_leader_text(prefix_title: str, page_label: str, *, width_pt: float, font_size_pt: float) -> str:
+    if not str(page_label or "").strip():
+        return ""
+    available_units = max(8.0, (width_pt / max(font_size_pt, 1.0)) * 0.84)
+    used_units = _toc_text_units(prefix_title) + _toc_text_units(page_label)
+    spare_units = available_units - used_units
+    if spare_units <= 1.4:
+        return "..."
+    dot_count = int(spare_units / 0.34)
+    return "." * max(3, min(48, dot_count))
+
+
+def _toc_estimated_text_width_pt(text: str, font_size_pt: float) -> float:
+    return _toc_text_units(text) * max(font_size_pt, 1.0) * 0.54
 
 
 def sanitize_typst_markdown_for_compile(markdown: str) -> str:
@@ -39,9 +78,20 @@ def _typst_string_array(values: list[str]) -> str:
     return "(" + ", ".join(f'"{escape_typst_string(value)}"' for value in values) + ("," if len(values) == 1 else "") + ")"
 
 
-def _build_preserved_line_box_typst(block_id: str, block: RenderBlock, *, text_fill: str) -> str:
+def _build_preserved_line_box_typst(block_id: str, block: RenderBlock, *, text_fill: str, block_fill: str) -> str:
     parts: list[str] = []
     font_weight = block.font_weight if str(block.font_weight or "").strip() else "regular"
+    if block.use_cover_fill:
+        cover_name = f"{block_id.replace('-', '_')}_cover"
+        cover_x0, cover_y0, cover_x1, cover_y1 = [float(value) for value in block.cover_bbox]
+        cover_width = max(typst_config.MIN_BLOCK_SIZE_PT, cover_x1 - cover_x0)
+        cover_height = max(typst_config.MIN_BLOCK_SIZE_PT, cover_y1 - cover_y0)
+        parts.extend(
+            [
+                f"#let {cover_name} = rect(width: {cover_width}pt, height: {cover_height}pt, fill: {typst_rgb(block.cover_fill)})",
+                typst_place_context(x_pt=cover_x0, y_pt=cover_y0, body_name=cover_name).rstrip(),
+            ]
+        )
     for index, line in enumerate(block.preserved_line_boxes or []):
         if len(line.bbox) != 4 or not str(line.text or "").strip():
             continue
@@ -55,12 +105,61 @@ def _build_preserved_line_box_typst(block_id: str, block: RenderBlock, *, text_f
         parts.extend(
             [
                 f'#let {line_name} = "{escape_typst_string(line.text)}"',
-                f"#let {body_name} = block(width: {width}pt, height: {height}pt)[#{{ "
+                f"#let {body_name} = block(width: {width}pt, height: {height}pt{block_fill})[#{{ "
                 f"set text(fill: {text_fill}); "
                 f'pdftr_fit_single_line_markdown({line_name}, max_size: {max_font_pt}pt, '
                 f'min_size: {min_font_pt}pt, fit_width: {width}pt, fit_height: {height}pt, '
                 f'weight: "{font_weight}", justify: false) }}]',
                 typst_place_context(x_pt=x0, y_pt=y0, body_name=body_name).rstrip(),
+            ]
+        )
+    return "\n".join(parts) + ("\n" if parts else "")
+
+
+def _build_toc_entry_typst(block_id: str, block: RenderBlock, *, text_fill: str) -> str:
+    parts: list[str] = []
+    font_weight = block.font_weight if str(block.font_weight or "").strip() else "regular"
+    for index, entry in enumerate(block.toc_entries or []):
+        if len(entry.bbox) != 4 or not str(entry.title or "").strip():
+            continue
+        x0, y0, x1, y1 = [float(value) for value in entry.bbox]
+        width = max(typst_config.MIN_BLOCK_SIZE_PT, x1 - x0)
+        height = max(typst_config.MIN_BLOCK_SIZE_PT, y1 - y0)
+        indent = round(max(0, int(entry.level or 1) - 1) * min(18.0, width * 0.06), 2)
+        max_font_pt = round(max(1.0, min(TOC_ENTRY_FONT_PT, height * 0.82)), 2)
+        min_font_pt = round(max(1.0, min(max_font_pt, TOC_ENTRY_MIN_FONT_PT, height * 0.58)), 2)
+        prefix = f"{entry.number} " if str(entry.number or "").strip() else ""
+        line_width = round(max(8.0, width - indent), 2)
+        prefix_title = build_direct_typst_passthrough_text(f"{prefix}{entry.title}")
+        page_label = str(entry.page_label or "").strip()
+        title_name = f"{block_id.replace('-', '_')}_toc_{index}_title"
+        page_name = f"{block_id.replace('-', '_')}_toc_{index}_page"
+        body_name = f"{block_id.replace('-', '_')}_toc_{index}_body"
+        title_y = round(max(0.0, height * 0.08), 2)
+        leader_y = round(height * 0.55, 2)
+        parts.extend(
+            [
+                f'#let {title_name} = "{escape_typst_string(prefix_title)}"',
+                f'#let {page_name} = "{escape_typst_string(page_label)}"',
+                f"#let {body_name} = block(width: {line_width}pt, height: {height}pt)[#{{ "
+                f"set text(size: {max_font_pt}pt, weight: \"{font_weight}\", fill: {text_fill}); "
+                "set par(leading: 0.15em, justify: false); "
+                "layout(size => { "
+                f"let page-body = box[#{{ {page_name} }}]; "
+                "let page-size = measure(page-body); "
+                f"let title-body = box[#{{ cmarker.render({title_name}, math: mitex) }}]; "
+                "let title-size = measure(title-body); "
+                "let title-max = calc.max(8pt, size.width - page-size.width - 8pt); "
+                "let title-width = calc.min(title-size.width, title-max); "
+                "let leader-start = title-width + 2pt; "
+                "let leader-end = size.width - page-size.width - 4pt; "
+                "let leader-len = calc.max(0pt, leader-end - leader-start); "
+                f"place(top + left, dx: 0pt, dy: {title_y}pt, box(width: title-width, clip: false)[#{{ title-body }}]); "
+                f"if leader-len > 2pt {{ place(top + left, dx: leader-start, dy: {leader_y}pt, "
+                "line(length: leader-len, stroke: (paint: rgb(120, 120, 120), thickness: 0.45pt, dash: (1pt, 2pt)))) }; "
+                f"place(top + left, dx: size.width - page-size.width, dy: {title_y}pt, page-body) "
+                "}) }]",
+                typst_place_context(x_pt=x0 + indent, y_pt=y0, body_name=body_name).rstrip(),
             ]
         )
     return "\n".join(parts) + ("\n" if parts else "")
@@ -127,8 +226,10 @@ def build_typst_block(block_id: str, block: RenderBlock, *, include_fill: bool =
     markdown = sanitize_typst_markdown_for_compile(block.markdown_text)
     first_line_indent = typst_config.first_line_indent_pt(block.first_line_indent_pt)
     justify_text = typst_config.typst_bool(block.justify_text)
+    if block.toc_entries:
+        return _build_toc_entry_typst(block_id, block, text_fill=text_fill)
     if block.preserve_line_breaks and block.preserved_line_boxes:
-        return _build_preserved_line_box_typst(block_id, block, text_fill=text_fill)
+        return _build_preserved_line_box_typst(block_id, block, text_fill=text_fill, block_fill=block_fill)
     if block.preserve_line_breaks and "\n" in markdown:
         lines_name = f"{fields.var_prefix}_lines"
         line_values = [line.strip() for line in markdown.splitlines() if line.strip()]

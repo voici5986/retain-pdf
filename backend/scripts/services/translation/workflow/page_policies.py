@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from services.translation.services.continuation import annotate_continuation_context_global
 from services.translation.services.continuation import summarize_continuation_decisions
@@ -27,6 +28,7 @@ def apply_page_policies(
     sci_cutoff_page_idx: int | None,
     sci_cutoff_block_idx: int | None,
     policy_config: TranslationPolicyConfig | None = None,
+    request_chat_content_fn: Callable[..., str] | None = None,
     progress_callback=None,
 ) -> int:
     classified_items = 0
@@ -51,6 +53,7 @@ def apply_page_policies(
             sci_cutoff_page_idx=sci_cutoff_page_idx,
             sci_cutoff_block_idx=sci_cutoff_block_idx,
             policy_config=policy_config,
+            request_chat_content_fn=request_chat_content_fn,
         )
         classified_items += page_classified
         print(
@@ -91,6 +94,7 @@ def review_and_apply_continuations(
     model: str,
     base_url: str,
     workers: int,
+    request_chat_content_fn: Callable[..., str],
     progress_callback=None,
 ) -> None:
     review_candidate_continuation_pairs(
@@ -101,6 +105,7 @@ def review_and_apply_continuations(
         base_url=base_url,
         workers=min(max(1, workers), 8),
         save_pages_fn=save_pages,
+        request_chat_content_fn=request_chat_content_fn,
         progress_callback=progress_callback,
     )
 

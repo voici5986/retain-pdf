@@ -10,10 +10,17 @@ REASONING_LEAK_MARKERS = (
     "综上，输出",
     "注意：原文",
     "译文也应保留",
+    "为保准确",
+    "更简洁",
+    "我选择",
+    "可以译为",
+    "可译为",
 )
 REASONING_LEAK_FINAL_PATTERNS = (
     re.compile(r"(?:综上，输出。?|因此输出：?)\s*(?P<text>.+?)\s*$", re.S),
     re.compile(r"输出[:：]\s*(?P<text>.+?)\s*$", re.S),
+    re.compile(r"我选择[:：]\s*[\"“](?P<text>[^\"”\n]+)[\"”]", re.S),
+    re.compile(r"我选择[:：]\s*(?P<text>[^\n。]+)", re.S),
 )
 
 
@@ -63,7 +70,15 @@ def salvage_reasoning_leak(text: str) -> tuple[str, bool]:
             continue
         candidate = str(match.group("text") or "").strip()
         candidate = candidate.splitlines()[0].strip()
+        candidate = candidate.strip("\"“”")
         if candidate and len(candidate) < max(180, len(raw) * 0.35):
+            return candidate, True
+    quoted_candidates = re.findall(r"[\"“]([^\"”\n]{4,180})[\"”]", raw)
+    for candidate in reversed(quoted_candidates):
+        candidate = candidate.strip()
+        if not candidate:
+            continue
+        if re.search(r"[\u4e00-\u9fff]", candidate) and not re.search(r"[A-Za-z]{4,}", candidate):
             return candidate, True
     return raw, False
 

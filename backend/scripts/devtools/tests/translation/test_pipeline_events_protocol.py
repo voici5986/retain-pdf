@@ -60,7 +60,8 @@ def test_pipeline_event_writer_emits_structured_jsonl(tmp_path: Path) -> None:
         "artifact_published",
     ]
     assert rows[0]["provider"] == "paddle"
-    assert rows[1]["user_stage"] == "translate"
+    assert rows[1]["user_stage"] == "translation"
+    assert rows[1]["created_at"] == rows[1]["ts"]
     assert rows[1]["progress_unit"] == "batch"
     assert rows[1]["progress_current"] == 3
     assert rows[1]["progress_total"] == 5
@@ -98,3 +99,46 @@ def test_artifact_published_prints_structured_stdout_event(tmp_path: Path, capsy
     assert stdout_rows[0]["event_type"] == "artifact_published"
     assert stdout_rows[0]["payload"]["artifact_key"] == "output_pdf"
     assert stdout_rows[0]["payload"]["path"] == str(artifact_path.resolve())
+
+
+def test_pipeline_event_writer_keeps_progress_monotonic_per_substage(tmp_path: Path) -> None:
+    logs_dir = tmp_path / "logs"
+    writer = PipelineEventWriter(
+        job_id="job-progress",
+        job_root=tmp_path,
+        logs_dir=logs_dir,
+        workflow="book",
+    )
+
+    with pipeline_event_writer_scope(writer):
+        emit_stage_progress(
+            stage="rendering",
+            message="page 10",
+            progress_current=10,
+            progress_total=20,
+            payload={"user_stage": "render", "substage": "render_pages", "progress_unit": "page"},
+        )
+        emit_stage_progress(
+            stage="rendering",
+            message="stale page 2",
+            progress_current=2,
+            progress_total=20,
+            payload={"user_stage": "render", "substage": "render_pages", "progress_unit": "page"},
+        )
+        emit_stage_progress(
+            stage="rendering",
+            message="compile step",
+            progress_current=1,
+            progress_total=4,
+            payload={"user_stage": "render", "substage": "render_compile", "progress_unit": "step"},
+        )
+
+    rows = [
+        json.loads(line)
+        for line in (logs_dir / "pipeline_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert rows[0]["progress_current"] == 10
+    assert rows[1]["progress_current"] == 10
+    assert rows[2]["progress_current"] == 1

@@ -19,6 +19,9 @@ pub(super) fn build_live_projection(job: &JobSnapshot, data_root: &Path) -> Book
         .as_ref()
         .and_then(|snapshot| snapshot.progress_total)
         .or(job.progress_total);
+    let unit = live_stage
+        .as_ref()
+        .and_then(|snapshot| snapshot.progress_unit.clone());
     BookLiveProjection {
         stage: live_stage
             .as_ref()
@@ -37,6 +40,7 @@ pub(super) fn build_live_projection(job: &JobSnapshot, data_root: &Path) -> Book
                 }
                 _ => None,
             },
+            unit,
         },
     }
 }

@@ -66,6 +66,7 @@ from services.rendering.workflow.modes import _compress_final_pdf_if_needed
 from services.rendering.document.pikepdf_overlay import overlay_pdf_pages_with_pikepdf
 from services.rendering.document.pikepdf_overlay import overlay_page_pdfs_with_pikepdf
 from services.rendering.document.pikepdf_pages import extract_pages_with_pikepdf
+from services.rendering.layout.inline_content.core.markdown import build_direct_typst_passthrough_text
 
 
 def _page_spec(background_pdf_path: Path | None = None) -> RenderPageSpec:
@@ -89,6 +90,32 @@ def _page_spec(background_pdf_path: Path | None = None) -> RenderPageSpec:
             )
         ],
     )
+
+
+def test_direct_typst_inline_math_internal_newline_is_folded_before_rendering() -> None:
+    markdown = build_direct_typst_passthrough_text(
+        "对于较大的 $ CN_{A}^{\\prime}\n$ 值，该 d 能级降低。"
+    )
+
+    assert "$CN_{A}^{\\prime}$" in markdown
+    assert "$ CN_{A}^{\\prime}\n$" not in markdown
+    assert "\n$" not in markdown
+
+
+def test_body_rendering_folds_model_visual_line_breaks_for_flow_text() -> None:
+    item = {
+        "item_id": "p005-b025",
+        "semantic_role": "body",
+        "structure_role": "body",
+        "text_flow": "preserve_lines",
+    }
+    translated = "对于较大的 $ CN_{A}^{\\prime}\n$ 值，该 d 能级能量降低。"
+
+    rendered = maybe_preserve_structured_line_breaks(item, translated)
+
+    assert "\n" not in rendered
+    assert rendered == "对于较大的 $ CN_{A}^{\\prime} $ 值，该 d 能级能量降低。"
+    assert "_render_preserve_line_breaks" not in item
 
 
 def test_pikepdf_overlay_merges_overlay_page_without_pymupdf_write() -> None:
@@ -1550,6 +1577,170 @@ def test_typst_overlay_can_use_block_cover_fill_as_fallback() -> None:
     assert "fill: rgb(255, 255, 255)" in source
 
 
+def test_background_book_source_draws_sampled_block_fill() -> None:
+    from services.rendering.output.typst.source_builder import build_typst_book_background_source
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source_pdf = root / "source.pdf"
+        doc = fitz.open()
+        doc.new_page(width=200, height=120)
+        doc.save(source_pdf)
+        doc.close()
+
+        source = build_typst_book_background_source(
+            source_pdf,
+            [
+                (
+                    0,
+                    200.0,
+                    120.0,
+                    [
+                        {
+                            "item_id": "p001-b001",
+                            "page_idx": 0,
+                            "block_type": "text",
+                            "bbox": [10.0, 20.0, 120.0, 62.0],
+                            "translated_text": "灰底文本块",
+                            "protected_translated_text": "灰底文本块",
+                            "formula_map": [],
+                            "_render_cover_fill": (0.85, 0.85, 0.85),
+                        }
+                    ],
+                )
+            ],
+            root,
+        )
+
+    assert "fill: rgb(216, 216, 216)" in source
+
+
+def test_old_overlay_prebuilt_source_without_render_version_is_not_reused() -> None:
+    from services.rendering.output.typst.overlay_source_cache import prebuilt_source_matches_page_specs
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "book-overlay.typ.prebuilt"
+        path.write_text(
+            '#set page(width: 200pt, height: 120pt, margin: 0pt, fill: none)\n',
+            encoding="utf-8",
+        )
+
+        assert not prebuilt_source_matches_page_specs(path, [(200.0, 120.0, [])])
+
+
+def test_render_color_profile_preserves_tuple_cover_fill() -> None:
+    from services.rendering.source.prewarm_color_profile import round_color
+    from services.rendering.source.prewarm_manifest import color_tuple
+
+    assert round_color((1.0, 0.9490196078431372, 0.8156862745098039)) == [1.0, 0.94902, 0.81569]
+    assert color_tuple((1.0, 0.9490196078431372, 0.8156862745098039), default=(0.0, 0.0, 0.0)) == (
+        1.0,
+        0.9490196078431372,
+        0.8156862745098039,
+    )
+
+
+def test_overlay_color_adapt_samples_local_gray_fill_without_page_background_image() -> None:
+    from services.rendering.output.typst.color_adapt import apply_adaptive_overlay_colors
+
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=200, height=160)
+        shape = page.new_shape()
+        shape.draw_rect(fitz.Rect(20, 30, 150, 80))
+        shape.finish(color=None, fill=(216 / 255.0, 216 / 255.0, 216 / 255.0))
+        shape.commit()
+        page.insert_text((28, 54), "source text", fontsize=10, color=(0, 0, 0))
+
+        adapted = apply_adaptive_overlay_colors(
+            page,
+            [
+                {
+                    "item_id": "p001-b001",
+                    "bbox": [26.0, 40.0, 130.0, 66.0],
+                    "translated_text": "译文",
+                }
+            ],
+        )
+    finally:
+        doc.close()
+
+    fill = adapted[0]["_render_cover_fill"]
+    assert fill != (1, 1, 1)
+    assert all(abs(component - 216 / 255.0) < 0.08 for component in fill)
+    assert adapted[0]["_render_text_color"] == (0, 0, 0)
+
+
+def test_overlay_color_adapt_prefers_inner_colored_panel_over_white_neighbors() -> None:
+    from services.rendering.output.typst.color_adapt import apply_adaptive_overlay_colors
+
+    panel = (248 / 255.0, 240 / 255.0, 208 / 255.0)
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=220, height=180)
+        shape = page.new_shape()
+        shape.draw_rect(fitz.Rect(40, 40, 170, 110))
+        shape.finish(color=None, fill=panel)
+        shape.commit()
+        for y in range(55, 96, 10):
+            page.insert_text((48, y), "source text on colored panel", fontsize=8, color=(0, 0, 0))
+
+        adapted = apply_adaptive_overlay_colors(
+            page,
+            [
+                {
+                    "item_id": "p001-b011",
+                    "bbox": [45.0, 48.0, 165.0, 102.0],
+                    "translated_text": "译文",
+                }
+            ],
+        )
+    finally:
+        doc.close()
+
+    fill = adapted[0]["_render_cover_fill"]
+    assert fill != (1, 1, 1)
+    assert all(abs(component - expected) < 0.08 for component, expected in zip(fill, panel))
+
+
+def test_overlay_color_adapt_uses_visual_title_text_color_only_for_titles() -> None:
+    from services.rendering.output.typst.color_adapt import apply_adaptive_overlay_colors
+
+    doc = fitz.open()
+    try:
+        page = doc.new_page(width=260, height=180)
+        page.insert_text((24, 48), "Colored Title", fontsize=24, color=(0.82, 0.05, 0.02))
+        page.insert_text((24, 95), "Colored body should not drive text color", fontsize=10, color=(0.0, 0.2, 0.85))
+
+        adapted = apply_adaptive_overlay_colors(
+            page,
+            [
+                {
+                    "item_id": "p001-title",
+                    "bbox": [20.0, 20.0, 220.0, 58.0],
+                    "layout_role": "title",
+                    "structure_role": "title",
+                    "translated_text": "彩色标题",
+                },
+                {
+                    "item_id": "p001-body",
+                    "bbox": [20.0, 78.0, 230.0, 105.0],
+                    "layout_role": "paragraph",
+                    "structure_role": "body",
+                    "translated_text": "正文",
+                },
+            ],
+        )
+    finally:
+        doc.close()
+
+    title_color = adapted[0]["_render_text_color"]
+    assert title_color[0] > 0.55
+    assert title_color[1] < 0.25
+    assert title_color[2] < 0.25
+    assert adapted[1]["_render_text_color"] == (0, 0, 0)
+
+
 def test_typst_overlay_text_blocks_use_fit_without_clipping() -> None:
     translated_items = [
         {
@@ -2175,8 +2366,8 @@ def test_caption_and_footnote_fonts_use_low_role_anchor() -> None:
 
     unify_annotation_fonts([caption_a, caption_b, footnote_a, footnote_b])
 
-    assert caption_a["font_size_pt"] == 8.96
-    assert caption_b["font_size_pt"] == 8.96
+    assert caption_a["font_size_pt"] == 8.9
+    assert caption_b["font_size_pt"] == 8.9
     assert footnote_a["font_size_pt"] == 7.84
     assert footnote_b["font_size_pt"] == 7.8
     assert footnote_a["font_size_pt"] < caption_a["font_size_pt"]
@@ -2277,8 +2468,23 @@ def test_caption_and_footnote_recovery_do_not_exceed_body_font_reference() -> No
 
     recover_underfilled_annotation_density([body, caption, footnote])
 
-    assert caption["font_size_pt"] <= round(body["font_size_pt"] * 0.95, 2)
+    assert caption["font_size_pt"] <= round(body["font_size_pt"] * 0.88, 2)
     assert footnote["font_size_pt"] <= round(body["font_size_pt"] * 0.82, 2)
+
+
+def test_caption_seed_font_is_restrained_below_body_scale() -> None:
+    from services.rendering.layout.font_size_fit import local_font_size_pt
+
+    item = {
+        "layout_role": "caption",
+        "semantic_role": "caption",
+        "block_kind": "text",
+        "source_text": "Figure 1. Caption text",
+        "bbox": [10.0, 10.0, 210.0, 24.0],
+        "lines": [{"bbox": [10.0, 10.0, 210.0, 24.0], "text": "Figure 1. Caption text"}],
+    }
+
+    assert local_font_size_pt(item) <= 10.0
 
 
 def test_page_leading_baseline_only_weakly_dampens_normal_body_leading_jumps() -> None:
@@ -2829,7 +3035,7 @@ def test_background_render_resilient_compile_sanitizes_on_failure() -> None:
 
         with mock.patch(
             "services.rendering.output.typst.book_renderer.compile_typst_render_pages_pdf",
-            side_effect=[RuntimeError("mitex failed"), root / "sanitized.pdf"],
+            side_effect=[RuntimeError("mitex failed"), root / "probe.pdf", root / "sanitized.pdf"],
         ) as compile_mock, mock.patch(
             "services.rendering.output.typst.book_renderer.collect_background_page_specs",
             return_value=[(0, 200.0, 300.0, translated_pages[0])],
@@ -2839,6 +3045,7 @@ def test_background_render_resilient_compile_sanitizes_on_failure() -> None:
         ):
             result, diagnostics = _compile_render_pages_pdf_resilient(
                 source_pdf_path=source_pdf,
+                color_sample_pdf_path=source_pdf,
                 background_pdf_path=background_pdf,
                 translated_pages=translated_pages,
                 page_specs=page_specs,
@@ -2849,8 +3056,144 @@ def test_background_render_resilient_compile_sanitizes_on_failure() -> None:
         assert diagnostics["background_compile_retried"] is True
         assert diagnostics["background_compile_failed"] is True
         assert "background_sanitize_elapsed_seconds" in diagnostics
-        assert compile_mock.call_count == 2
-        assert compile_mock.call_args_list[1].kwargs["stem"] == "book-background-overlay-sanitized"
+        assert compile_mock.call_count == 3
+        assert compile_mock.call_args_list[2].kwargs["stem"] == "book-background-overlay-sanitized"
+
+
+def test_background_render_resilient_compile_sanitizes_only_bad_pages() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source_pdf = root / "source.pdf"
+        background_pdf = root / "background.pdf"
+
+        doc = fitz.open()
+        for _ in range(4):
+            doc.new_page(width=200, height=300)
+        doc.save(source_pdf)
+        doc.save(background_pdf)
+        doc.close()
+
+        translated_pages = {
+            page_idx: [
+                {
+                    "item_id": f"p{page_idx + 1:03d}-b001",
+                    "page_idx": page_idx,
+                    "block_type": "text",
+                    "bbox": [10.0, 20.0, 180.0, 80.0],
+                    "lines": [{"text": "raw"}],
+                    "source_text": "raw text",
+                    "protected_source_text": "raw text",
+                    "protected_translated_text": "translated text",
+                }
+            ]
+            for page_idx in range(4)
+        }
+        page_specs = build_render_page_specs(
+            source_pdf_path=source_pdf,
+            translated_pages=translated_pages,
+        )
+
+        def fake_compile(*, page_specs, stem, **kwargs):
+            del kwargs
+            if stem == "book-background-overlay":
+                raise RuntimeError("mitex failed")
+            if "probe" in stem and any(spec.page_index == 2 for spec in page_specs):
+                raise RuntimeError("mitex failed")
+            return root / f"{stem}.pdf"
+
+        with mock.patch(
+            "services.rendering.output.typst.book_renderer.compile_typst_render_pages_pdf",
+            side_effect=fake_compile,
+        ), mock.patch(
+            "services.rendering.output.typst.book_renderer.collect_background_page_specs",
+            return_value=[
+                (page_idx, 200.0, 300.0, translated_pages[page_idx])
+                for page_idx in range(4)
+            ],
+        ), mock.patch(
+            "services.rendering.output.typst.book_renderer.sanitize_page_specs_for_typst_book_background",
+            return_value=[
+                (page_idx, 200.0, 300.0, translated_pages[page_idx])
+                for page_idx in range(4)
+            ],
+        ) as sanitize_mock:
+            result, diagnostics = _compile_render_pages_pdf_resilient(
+                source_pdf_path=source_pdf,
+                color_sample_pdf_path=source_pdf,
+                background_pdf_path=background_pdf,
+                translated_pages=translated_pages,
+                page_specs=page_specs,
+                work_dir=root,
+            )
+
+        assert result == root / "book-background-overlay-sanitized.pdf"
+        assert diagnostics["background_bad_page_indices"] == [2]
+        assert sanitize_mock.call_args.kwargs["page_indices"] == {2}
+
+
+def test_background_render_color_adapt_samples_original_pdf_not_cleaned_background() -> None:
+    from services.rendering.output.typst.book_renderer import _apply_background_page_color_adapt
+    from services.rendering.output.typst.emitter import build_typst_source_from_page_specs
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        original_pdf = root / "original.pdf"
+        cleaned_pdf = root / "cleaned.pdf"
+
+        doc = fitz.open()
+        page = doc.new_page(width=200, height=160)
+        shape = page.new_shape()
+        shape.draw_rect(fitz.Rect(20, 30, 150, 80))
+        shape.finish(color=None, fill=(216 / 255.0, 216 / 255.0, 216 / 255.0))
+        shape.commit()
+        page.insert_text((28, 54), "source text", fontsize=10, color=(0, 0, 0))
+        doc.save(original_pdf)
+        doc.close()
+
+        doc = fitz.open()
+        page = doc.new_page(width=200, height=160)
+        shape = page.new_shape()
+        shape.draw_rect(fitz.Rect(20, 30, 150, 80))
+        shape.finish(color=None, fill=(1, 1, 1))
+        shape.commit()
+        doc.save(cleaned_pdf)
+        doc.close()
+
+        translated_pages = {
+            0: [
+                {
+                    "item_id": "p001-b001",
+                    "page_idx": 0,
+                    "block_type": "text",
+                    "block_kind": "text",
+                    "bbox": [26.0, 40.0, 130.0, 66.0],
+                    "lines": [{"text": "source text", "bbox": [26.0, 40.0, 130.0, 66.0]}],
+                    "source_text": "source text",
+                    "protected_source_text": "source text",
+                    "protected_translated_text": "译文",
+                    "translated_text": "译文",
+                    "formula_map": [],
+                }
+            ]
+        }
+        adapted_pages = _apply_background_page_color_adapt(
+            sample_pdf_path=original_pdf,
+            translated_pages=translated_pages,
+        )
+        page_specs = build_render_page_specs(
+            source_pdf_path=cleaned_pdf,
+            translated_pages=adapted_pages,
+            background_pdf_path=cleaned_pdf,
+            prepared=True,
+        )
+        source = build_typst_source_from_page_specs(
+            background_pdf_path=cleaned_pdf,
+            page_specs=page_specs,
+            work_dir=root,
+        )
+
+    assert "fill: rgb(216, 216, 216)" in source
+    assert "fill: rgb(255, 255, 255)" not in source
 
 
 def test_direct_math_layout_shrinks_font_to_fit_rect() -> None:
@@ -3071,7 +3414,7 @@ def test_build_render_blocks_skips_model_keep_origin_shell_commands_with_dollars
     assert blocks == []
 
 
-def test_continuation_group_member_prefers_unit_translation_for_rendering() -> None:
+def test_continuation_group_member_prefers_member_translation_for_rendering() -> None:
     from services.rendering.layout.payload.render_item import render_protected_translation_text
 
     item = {
@@ -3091,10 +3434,10 @@ def test_continuation_group_member_prefers_unit_translation_for_rendering() -> N
         ),
     }
 
-    assert render_protected_translation_text(item).startswith("激发谱的每个模式")
+    assert render_protected_translation_text(item).startswith("$来表征")
 
 
-def test_prepare_render_payloads_splits_single_kind_continuation_group_members() -> None:
+def test_prepare_render_payloads_keeps_member_translations_for_continuation_group_members() -> None:
     translated_pages = {
         1: [
             {
@@ -3150,12 +3493,116 @@ def test_prepare_render_payloads_splits_single_kind_continuation_group_members()
     first = prepared[1][0]["render_protected_text"]
     second = prepared[2][0]["render_protected_text"]
 
-    assert first
-    assert second
-    assert first != second
-    assert first + second != first
-    assert "激发谱的每个模式" in first
-    assert not second.startswith("$来表征")
+    assert first == "局部旧文本"
+    assert second == "$来表征，所有这些量均可通过拟合不同温度及$Q_{0}$值下的激发谱获得。"
+
+
+def test_prepare_render_payloads_does_not_resplit_materialized_cross_page_member_translations() -> None:
+    translated_pages = {
+        11: [
+            {
+                "item_id": "p012-b009",
+                "page_idx": 11,
+                "bbox": [56.994, 740.875, 302.469, 764.371],
+                "block_type": "text",
+                "math_mode": "direct_typst",
+                "translation_unit_id": "__cg__:cg-012-016",
+                "translation_unit_kind": "single",
+                "continuation_group": "cg-012-016",
+                "protected_source_text": "Having demonstrated the good performance of GFN2-xTB for small systems including",
+                "translation_unit_protected_source_text": "Having demonstrated the good performance of GFN2-xTB for small systems including different elements and interaction types, we next turn our attention to larger systems. This behavior partially results from nonadditivity dispersion effects.",
+                "translated_text": "我们已经证明了GFN2-xTB对于包含不同元素和相互作用类型的小体系的",
+                "protected_translated_text": "我们已经证明了GFN2-xTB对于包含不同元素和相互作用类型的小体系的",
+                "translation_unit_protected_translated_text": "我们已经证明了GFN2-xTB对于包含不同元素和相互作用类型的小体系的非共价相互作用具有良好的性能，接下来我们将关注更大的体系。这种行为部分源于非加和色散效应。",
+                "translation_unit_formula_map": [],
+            },
+            {
+                "item_id": "p012-b012",
+                "page_idx": 11,
+                "bbox": [319.967, 499.916, 567.442, 765.371],
+                "block_type": "text",
+                "math_mode": "direct_typst",
+                "translation_unit_id": "__cg__:cg-012-016",
+                "translation_unit_kind": "single",
+                "continuation_group": "cg-012-016",
+                "protected_source_text": "different elements and interaction types, we next turn our attention to larger systems.",
+                "translation_unit_protected_source_text": "Having demonstrated the good performance of GFN2-xTB for small systems including different elements and interaction types, we next turn our attention to larger systems. This behavior partially results from nonadditivity dispersion effects.",
+                "translated_text": "非共价相互作用具有良好的性能，接下来我们将关注更大的体系。",
+                "protected_translated_text": "非共价相互作用具有良好的性能，接下来我们将关注更大的体系。",
+                "translation_unit_protected_translated_text": "我们已经证明了GFN2-xTB对于包含不同元素和相互作用类型的小体系的非共价相互作用具有良好的性能，接下来我们将关注更大的体系。这种行为部分源于非加和色散效应。",
+                "translation_unit_formula_map": [],
+            },
+        ],
+        12: [
+            {
+                "item_id": "p013-b004",
+                "page_idx": 12,
+                "bbox": [56.994, 290.451, 302.969, 378.436],
+                "block_type": "text",
+                "math_mode": "direct_typst",
+                "translation_unit_id": "__cg__:cg-012-016",
+                "translation_unit_kind": "single",
+                "continuation_group": "cg-012-016",
+                "protected_source_text": "This behavior partially results from nonadditivity dispersion effects.",
+                "translation_unit_protected_source_text": "Having demonstrated the good performance of GFN2-xTB for small systems including different elements and interaction types, we next turn our attention to larger systems. This behavior partially results from nonadditivity dispersion effects.",
+                "translated_text": "这种行为部分源于非加和色散效应。",
+                "protected_translated_text": "这种行为部分源于非加和色散效应。",
+                "translation_unit_protected_translated_text": "我们已经证明了GFN2-xTB对于包含不同元素和相互作用类型的小体系的非共价相互作用具有良好的性能，接下来我们将关注更大的体系。这种行为部分源于非加和色散效应。",
+                "translation_unit_formula_map": [],
+            }
+        ],
+    }
+
+    prepared = prepare_render_payloads_by_page(translated_pages)
+
+    assert prepared[11][0]["render_protected_text"] == "我们已经证明了GFN2-xTB对于包含不同元素和相互作用类型的小体系的"
+    assert prepared[11][1]["render_protected_text"] == "非共价相互作用具有良好的性能，接下来我们将关注更大的体系。"
+    assert prepared[12][0]["render_protected_text"] == "这种行为部分源于非加和色散效应。"
+
+
+def test_continuation_member_does_not_inherit_short_body_font_from_context() -> None:
+    from services.rendering.layout.payload.body_font_inheritance_policy import inherit_short_body_fonts
+
+    def payload(item_id: str, bbox: list[float], font_size: float, *, continuation: bool = False) -> dict:
+        item = {
+            "item_id": item_id,
+            "block_kind": "text",
+            "block_type": "text",
+            "layout_role": "paragraph",
+            "semantic_role": "body",
+            "source_text": "source words for context",
+        }
+        if continuation:
+            item["continuation_group"] = "cg-001-001"
+        return {
+            "item": item,
+            "render_kind": "markdown",
+            "is_body": True,
+            "inner_bbox": bbox,
+            "translated_text": "译文",
+            "formula_map": [],
+            "font_size_pt": font_size,
+            "leading_em": 0.42,
+            "dense_small_box": False,
+            "heavy_dense_small_box": False,
+            "title_fit": None,
+        }
+
+    anchors = [
+        payload("p001-b001", [40.0, 40.0, 180.0, 88.0], 10.4),
+        payload("p001-b002", [40.0, 96.0, 180.0, 144.0], 10.2),
+    ]
+    continuation_member = payload("p002-b001", [40.0, 152.0, 120.0, 164.0], 8.2, continuation=True)
+    normal_short = payload("p001-b003", [40.0, 172.0, 120.0, 184.0], 8.2)
+
+    inherit_short_body_fonts(
+        [*anchors, continuation_member, normal_short],
+        [*anchors, continuation_member, normal_short],
+        page_text_width_med=140.0,
+    )
+
+    assert continuation_member.get("_short_body_inherited_font_floor_pt") is None
+    assert normal_short.get("_short_body_inherited_font_floor_pt") is not None
 
 
 def test_final_pdf_compression_skips_when_source_already_compressed() -> None:
@@ -3350,7 +3797,129 @@ def test_text_heavy_inline_math_demotes_latex_text_to_plain_text() -> None:
 
     assert r"\text{其中" not in markdown
     assert "表示电子" in markdown
-    assert "电子与原子核" in markdown
-    assert "$\\nabla_i \\equiv \\nabla_{r_i}$" in markdown
-    assert "$\\mathbf{r}_i$" in markdown
-    assert "$Z_\\alpha e, e = |e|$" in markdown
+
+
+def test_direct_typst_adjacent_inline_math_boundaries_do_not_cross_text() -> None:
+    from services.rendering.layout.inline_content.core.markdown import build_direct_typst_passthrough_text
+    from services.rendering.layout.inline_content.core.inline_math import MATH_BLOCK_RE
+
+    text = (
+        r"根据Stewart的高斯展开，$^{70}$$ \phi_{\kappa} $指的是收缩型高斯原子轨道，"
+        r"用于近似指数为$ \zeta_{\kappa} $的球面斯莱特型轨道。"
+    )
+
+    markdown = build_direct_typst_passthrough_text(text)
+
+    assert "$^{70}$" in markdown
+    assert r"$\phi_{\kappa}$" in markdown
+    assert r"$\zeta_{\kappa}$" in markdown
+    assert "指的是收缩型高斯原子轨道" in markdown
+    assert r"\$phi" not in markdown
+    assert not any("指的是收缩型高斯原子轨道" in match.group(0) for match in MATH_BLOCK_RE.finditer(markdown))
+
+
+def test_toc_entries_render_with_typst_style_rows() -> None:
+    blocks = build_render_blocks(
+        [
+            {
+                "item_id": "p010-b001",
+                "page_idx": 9,
+                "block_type": "text",
+                "block_kind": "text",
+                "layout_role": "toc",
+                "semantic_role": "table_of_contents",
+                "structure_role": "table_of_contents",
+                "normalized_sub_type": "table_of_contents",
+                "bbox": [100.0, 200.0, 780.0, 260.0],
+                "text_flow": "preserve_lines",
+                "source_text": "1 Introduction ..... 1\n2 Foundations of Density Functional Theory ..... 11",
+                "protected_translated_text": "1 引言 ..... 1\n2 密度泛函理论基础 ..... 11",
+                "source_line_texts": [
+                    "1 Introduction ..... 1",
+                    "2 Foundations of Density Functional Theory ..... 11",
+                ],
+                "lines": [
+                    {"bbox": [100.0, 200.0, 780.0, 230.0], "spans": [{"content": "1 Introduction ..... 1"}]},
+                    {"bbox": [100.0, 230.0, 780.0, 260.0], "spans": [{"content": "2 Foundations of Density Functional Theory ..... 11"}]},
+                ],
+                "toc_entries": [
+                    {
+                        "number": "1",
+                        "title": "Introduction",
+                        "page_label": "1",
+                        "level": 1,
+                        "line_index": 0,
+                        "bbox": [200.0, 400.0, 1560.0, 460.0],
+                    },
+                    {
+                        "number": "2",
+                        "title": "Foundations of Density Functional Theory",
+                        "page_label": "11",
+                        "level": 1,
+                        "line_index": 1,
+                        "bbox": [200.0, 460.0, 1560.0, 520.0],
+                    },
+                ],
+            }
+        ],
+        page_width=595.0,
+        page_height=842.0,
+    )
+
+    typst = build_typst_block("rp9_item_p010_b001_0", blocks[0])
+
+    assert "layout(size =>" in typst
+    assert "measure(title-body)" in typst
+    assert '"1 引言"' in typst
+    assert '"2 密度泛函理论基础"' in typst
+    assert "dash: (1pt, 2pt)" in typst
+    assert '_toc_0_page = "1"' in typst
+    assert '_toc_1_page = "11"' in typst
+    assert "size.width - page-size.width" in typst
+    assert "dy: 230.0pt" in typst
+    assert "dx: 200.0pt" not in typst
+
+
+def test_toc_entries_normalize_spaced_inline_math() -> None:
+    blocks = build_render_blocks(
+        [
+            {
+                "item_id": "p010-b001",
+                "page_idx": 9,
+                "block_type": "text",
+                "block_kind": "text",
+                "layout_role": "toc",
+                "semantic_role": "table_of_contents",
+                "structure_role": "table_of_contents",
+                "normalized_sub_type": "table_of_contents",
+                "bbox": [100.0, 200.0, 780.0, 230.0],
+                "text_flow": "preserve_lines",
+                "source_text": "4.2 Exact Representations of $ E_{xc}[n] $ ..... 115",
+                "protected_translated_text": "4.2 $ E_{xc}[n] $ 的精确表示 ..... 115",
+                "source_line_texts": ["4.2 Exact Representations of $ E_{xc}[n] $ ..... 115"],
+                "lines": [
+                    {
+                        "bbox": [100.0, 200.0, 780.0, 230.0],
+                        "spans": [{"content": "4.2 Exact Representations of $ E_{xc}[n] $ ..... 115"}],
+                    },
+                ],
+                "toc_entries": [
+                    {
+                        "number": "4.2",
+                        "title": "Exact Representations of $ E_{xc}[n] $",
+                        "page_label": "115",
+                        "level": 2,
+                        "line_index": 0,
+                        "bbox": [200.0, 400.0, 1560.0, 460.0],
+                    },
+                ],
+            }
+        ],
+        page_width=595.0,
+        page_height=842.0,
+    )
+
+    typst = build_typst_block("rp9_item_p010_b001_0", blocks[0])
+
+    assert '"4.2 $E_{xc}[n]$ 的精确表示"' in typst
+    assert '"4.2 $ E_{xc}[n] $ 的精确表示"' not in typst

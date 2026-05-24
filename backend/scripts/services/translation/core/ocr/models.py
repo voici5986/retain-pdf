@@ -14,6 +14,7 @@ class TextItem:
     lines: list[dict]
     line_texts: list[str] = field(default_factory=list)
     text_flow: str = "flow"
+    toc_entries: list[dict] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     block_kind: str = ""
     layout_role: str = ""

@@ -169,6 +169,49 @@ def same_column(prev_bbox: list[float], next_bbox: list[float]) -> bool:
     return abs(next_bbox[0] - prev_bbox[0]) <= 28
 
 
+def layout_zone(item: dict) -> str:
+    return str(item.get("layout_zone", "") or "").strip().lower()
+
+
+def layout_boundary_role(item: dict) -> str:
+    return str(item.get("layout_boundary_role", "") or "").strip().lower()
+
+
+def is_reading_boundary_cross_column_pair(prev_item: dict, next_item: dict) -> bool:
+    if not is_same_page_cross_column_pair(prev_item, next_item):
+        return False
+    return (
+        layout_zone(prev_item) == "left_column"
+        and layout_boundary_role(prev_item) in {"tail", "single"}
+        and layout_zone(next_item) == "right_column"
+        and layout_boundary_role(next_item) in {"head", "single"}
+    )
+
+
+def is_reading_boundary_cross_page_pair(prev_item: dict, next_item: dict) -> bool:
+    prev_page_idx = prev_item.get("page_idx", -1)
+    next_page_idx = next_item.get("page_idx", -1)
+    if next_page_idx != prev_page_idx + 1:
+        return False
+
+    prev_role = layout_boundary_role(prev_item)
+    next_role = layout_boundary_role(next_item)
+    if prev_role or next_role:
+        if prev_role not in {"tail", "single"}:
+            return False
+        if next_role not in {"head", "single"}:
+            return False
+
+    prev_zone = layout_zone(prev_item)
+    next_zone = layout_zone(next_item)
+    if not prev_zone and not next_zone:
+        return True
+    return (
+        prev_zone in {"right_column", "full_width", "single_column"}
+        and next_zone in {"left_column", "full_width", "single_column"}
+    )
+
+
 def likely_pair_geometry(prev_item: dict, next_item: dict) -> bool:
     prev_bbox = bbox(prev_item)
     next_bbox = bbox(next_item)

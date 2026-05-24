@@ -75,6 +75,12 @@ def block_text_flow(block: dict) -> str:
     return str(content.get("text_flow", "") or "").strip().lower()
 
 
+def block_toc_entries(block: dict) -> list[dict]:
+    content = block.get("content", {}) or {}
+    entries = content.get("toc_entries", [])
+    return list(entries) if isinstance(entries, list) else []
+
+
 def block_kind(block: dict) -> str:
     content = block.get("content", {}) or {}
     return str(content.get("kind", "unknown") or "unknown").strip().lower()
@@ -138,6 +144,7 @@ __all__ = [
     "block_sub_type",
     "block_text",
     "block_text_flow",
+    "block_toc_entries",
     "ensure_normalized_document",
     "get_pages",
     "is_normalized_document",

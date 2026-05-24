@@ -685,7 +685,8 @@ impl Db {
         Ok(JobEventRecord {
             job_id: job_id.to_string(),
             seq: next_seq,
-            ts,
+            ts: ts.clone(),
+            created_at: ts,
             level: level.to_string(),
             user_stage,
             stage,
@@ -785,7 +786,7 @@ fn user_stage_for_event(stage: Option<&str>) -> Option<String> {
         | "continuation_review"
         | "page_policies"
         | "domain_inference"
-        | "garbled_repair" => Some("translate".to_string()),
+        | "garbled_repair" => Some("translation".to_string()),
         "render_prepare" | "rendering" | "compile" | "overlay" | "saving" => {
             Some("render".to_string())
         }

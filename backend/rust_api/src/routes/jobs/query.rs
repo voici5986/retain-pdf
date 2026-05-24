@@ -961,7 +961,8 @@ mod tests {
             .find(|item| item["event_type"] == "stage_progress")
             .expect("pipeline event item");
         assert_eq!(pipeline_item["provider"], "paddle");
-        assert_eq!(pipeline_item["user_stage"], "translate");
+        assert_eq!(pipeline_item["user_stage"], "translation");
+        assert_eq!(pipeline_item["created_at"], "2026-04-24T01:00:00Z");
         assert_eq!(pipeline_item["progress_unit"], "batch");
         assert_eq!(pipeline_item["progress_current"], 2);
         assert_eq!(pipeline_item["payload"]["origin"], "python");
@@ -1025,6 +1026,7 @@ mod tests {
         assert_eq!(detail_json["data"]["stage_detail"], "正在渲染第 1/3 页");
         assert_eq!(detail_json["data"]["progress"]["current"], 1);
         assert_eq!(detail_json["data"]["progress"]["total"], 3);
+        assert_eq!(detail_json["data"]["progress"]["unit"], "page");
     }
 
     #[tokio::test]
@@ -1532,6 +1534,55 @@ mod tests {
         assert_eq!(detail_json["data"]["stage_detail"], "已完成第 2/5 批翻译");
         assert_eq!(detail_json["data"]["progress"]["current"], 2);
         assert_eq!(detail_json["data"]["progress"]["total"], 5);
+    }
+
+    #[tokio::test]
+    async fn job_detail_route_keeps_render_page_progress_over_compile_steps() {
+        let state = test_state("detail-render-page-over-compile");
+        let mut job = JobSnapshot::new(
+            "job-route-render-page-over-compile".to_string(),
+            CreateJobInput::default(),
+            vec!["python".to_string()],
+        );
+        job.stage = Some("rendering".to_string());
+        let job_root: PathBuf = state.config.data_root.join("jobs").join(&job.job_id);
+        fs::create_dir_all(job_root.join("logs")).expect("create logs dir");
+        job.artifacts
+            .get_or_insert_with(crate::models::JobArtifacts::default)
+            .job_root = Some(job_root.to_string_lossy().to_string());
+        state.db.save_job(&job).expect("save job");
+        fs::write(
+            job_root.join("logs").join("pipeline_events.jsonl"),
+            concat!(
+                r#"{"job_id":"job-route-render-page-over-compile","seq":1,"ts":"2026-04-24T01:00:00Z","level":"info","user_stage":"render","stage":"rendering","substage":"render_pages","stage_detail":"正在生成 Typst 页面，第 548/548 页","event_type":"stage_progress","message":"正在生成 Typst 页面，第 548/548 页","progress_current":548,"progress_total":548,"progress_unit":"page","payload":{"render_stage":"typst_source_build"}}"#,
+                "\n",
+                r#"{"job_id":"job-route-render-page-over-compile","seq":2,"ts":"2026-04-24T01:00:01Z","level":"info","user_stage":"render","stage":"rendering","substage":"render_compile","stage_detail":"整本 Typst 渲染编译完成，共 548 页","event_type":"stage_progress","message":"整本 Typst 渲染编译完成，共 548 页","progress_current":4,"progress_total":4,"progress_unit":"step","payload":{"render_stage":"background_typst_compile_done"}}"#,
+                "\n"
+            ),
+        )
+        .expect("write pipeline events");
+
+        let app = build_app(state.clone());
+        let detail_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/jobs/{}", job.job_id))
+                    .header("X-API-Key", "test-key")
+                    .body(Body::empty())
+                    .expect("detail request"),
+            )
+            .await
+            .expect("detail response");
+        assert_eq!(detail_response.status(), StatusCode::OK);
+        let detail_json = read_json(detail_response).await;
+        assert_eq!(detail_json["data"]["stage"], "rendering");
+        assert_eq!(
+            detail_json["data"]["stage_detail"],
+            "整本 Typst 渲染编译完成，共 548 页"
+        );
+        assert_eq!(detail_json["data"]["progress"]["current"], 548);
+        assert_eq!(detail_json["data"]["progress"]["total"], 548);
+        assert_eq!(detail_json["data"]["progress"]["unit"], "page");
     }
 
     #[tokio::test]

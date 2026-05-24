@@ -161,6 +161,7 @@ def build_translation_record(item: TextItem, *, math_mode: str) -> dict:
         "source_text": item.text,
         "source_line_texts": list(getattr(item, "line_texts", []) or []),
         "text_flow": str(getattr(item, "text_flow", "") or "flow"),
+        "toc_entries": list(getattr(item, "toc_entries", []) or []),
         "lines": item.lines,
         "metadata": item.metadata,
         **ocr_continuation_fields(item.metadata),

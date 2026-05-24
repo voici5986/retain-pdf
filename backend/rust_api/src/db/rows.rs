@@ -72,6 +72,7 @@ pub(super) fn row_to_job_event(row: &Row<'_>) -> rusqlite::Result<JobEventRecord
         job_id: row.get(0)?,
         seq: row.get(1)?,
         ts: row.get(2)?,
+        created_at: row.get(2)?,
         level: row.get(3)?,
         user_stage: user_stage_for_event(stage.as_deref()),
         stage: stage.clone(),
@@ -102,7 +103,7 @@ fn user_stage_for_event(stage: Option<&str>) -> Option<String> {
         | "continuation_review"
         | "page_policies"
         | "domain_inference"
-        | "garbled_repair" => Some("translate".to_string()),
+        | "garbled_repair" => Some("translation".to_string()),
         "render_prepare" | "rendering" | "compile" | "overlay" | "saving" => {
             Some("render".to_string())
         }

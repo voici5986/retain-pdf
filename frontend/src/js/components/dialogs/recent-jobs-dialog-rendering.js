@@ -76,7 +76,6 @@ export function recentJobsElements(host) {
     list: host.querySelector("#recent-jobs-list"),
     empty: host.querySelector("#recent-jobs-empty"),
     loadMoreButton: host.querySelector("#load-more-jobs-btn"),
-    dateInput: host.querySelector("#recent-jobs-date"),
     dialog: host.querySelector("#query-dialog"),
   };
 }
@@ -90,13 +89,6 @@ export function setRecentJobsOpen(host, open) {
     dialog.showModal();
   } else {
     dialog.close();
-  }
-}
-
-export function setRecentJobsDateValue(host, value) {
-  const { dateInput } = recentJobsElements(host);
-  if (dateInput) {
-    dateInput.value = value || "";
   }
 }
 

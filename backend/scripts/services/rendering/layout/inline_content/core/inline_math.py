@@ -17,7 +17,7 @@ MARKDOWN_EMPHASIS_RE = re.compile(
     r"(?P=marker)"
     r"(?!\*)"
 )
-ADJACENT_INLINE_MATH_BOUNDARY_RE = re.compile(r"(?<=[^\s$])\$\$(?=[^\s$])")
+ADJACENT_INLINE_MATH_BOUNDARY_RE = re.compile(r"(?<=[^\s$])\$\$(?=\s*[^$\s])")
 PAREN_INLINE_MATH_RE = re.compile(
     r"(?P<open>[\(])\s*"
     r"(?P<math>(?<!\\)(?<!\$)\$(?!\$)(?:\\.|[^$\\\n])+(?<!\\)\$(?!\$))"
@@ -99,6 +99,38 @@ def normalize_direct_typst_math_boundaries(text: str) -> str:
         return f"${match.group('open')}{expr}{match.group('close')}$"
 
     return PAREN_INLINE_MATH_RE.sub(_wrap_parenthesized_math, source)
+
+
+def normalize_direct_typst_inline_math_whitespace(text: str) -> str:
+    source = str(text or "")
+    if not source:
+        return ""
+    chunks: list[str] = []
+    index = 0
+    in_inline_math = False
+    while index < len(source):
+        char = source[index]
+        prev_char = source[index - 1] if index > 0 else ""
+        next_char = source[index + 1] if index + 1 < len(source) else ""
+        if char == "$" and prev_char != "\\":
+            if next_char == "$":
+                chunks.append("$$")
+                index += 2
+                continue
+            in_inline_math = not in_inline_math
+            chunks.append(char)
+            index += 1
+            continue
+        if in_inline_math and char in "\r\n":
+            if not chunks or chunks[-1] != " ":
+                chunks.append(" ")
+            index += 1
+            while index < len(source) and source[index] in "\r\n\t ":
+                index += 1
+            continue
+        chunks.append(char)
+        index += 1
+    return "".join(chunks)
 
 
 def _scan_latex_text_blocks(expr: str) -> list[tuple[str, str]]:
@@ -193,9 +225,7 @@ def _demote_text_heavy_inline_math_expr(expr: str) -> str | None:
     parts = _scan_latex_text_blocks(expr)
     text_parts = [_plain_text_from_latex_text(value) for kind, value in parts if kind == "text"]
     text_char_count = sum(len(value) for value in text_parts)
-    if len(text_parts) < TEXT_HEAVY_INLINE_MATH_MIN_TEXT_BLOCKS and text_char_count < TEXT_HEAVY_INLINE_MATH_MIN_TEXT_CHARS:
-        return None
-    if text_char_count <= 0:
+    if text_char_count < TEXT_HEAVY_INLINE_MATH_MIN_TEXT_CHARS:
         return None
 
     chunks: list[str] = []
@@ -255,8 +285,9 @@ def sanitize_direct_typst_inline_math(text: str) -> str:
 
 
 def build_direct_typst_passthrough_markdown(text: str) -> str:
-    markdown = apply_to_non_math_segments(str(text or "").strip(), escape_literal_asterisks_preserving_emphasis)
-    markdown = normalize_direct_typst_math_boundaries(markdown)
+    normalized = normalize_direct_typst_math_boundaries(str(text or "").strip())
+    normalized = normalize_direct_typst_inline_math_whitespace(normalized)
+    markdown = apply_to_non_math_segments(normalized, escape_literal_asterisks_preserving_emphasis)
     markdown = demote_text_heavy_inline_math(markdown)
     markdown = sanitize_direct_typst_inline_math(markdown)
     return surround_inline_math_with_spaces(markdown)

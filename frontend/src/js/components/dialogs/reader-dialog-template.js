@@ -55,7 +55,12 @@ export function readerDialogTemplate() {
             </div>
           </div>
         </div>
-        <iframe id="reader-dialog-frame" class="reader-dialog-frame" title="对照阅读"></iframe>
+        <iframe
+          id="reader-dialog-frame"
+          class="reader-dialog-frame"
+          title="对照阅读"
+          srcdoc="<style>html,body{margin:0;min-height:100%;background:#f3f4f6;color:#1d1d1f}</style>"
+        ></iframe>
       </div>
     </dialog>
   `;

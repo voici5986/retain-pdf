@@ -24,6 +24,10 @@ _TAGGED_ITEM_BLOCK_RE = re.compile(
     r"\s*<<<END>>>",
     re.DOTALL,
 )
+_PROTOCOL_SHELL_HINT_RE = re.compile(
+    r"(translated_text|translations|item_id|decision|```json|<<<ITEM)",
+    re.IGNORECASE,
+)
 
 
 def extract_json_text(content: str) -> str:
@@ -59,6 +63,8 @@ def extract_single_item_translation_text(content: str, item_id: str) -> str:
     try:
         payload = json.loads(extract_json_text(text))
     except Exception:
+        if _PROTOCOL_SHELL_HINT_RE.search(text):
+            raise
         return text
 
     if isinstance(payload, dict) and "translated_text" in payload:

@@ -343,6 +343,57 @@ def test_paddle_page_spec_marks_text_title_and_vision_footnote_translation_candi
     ]
 
 
+def test_paddle_content_label_becomes_translatable_toc() -> None:
+    page_payload = {
+        "prunedResult": {
+            "width": 1200,
+            "height": 1600,
+            "parsing_res_list": [
+                {
+                    "block_label": "content",
+                    "block_content": (
+                        "1 Introduction ..... 1\n"
+                        "2 Foundations of Density Functional Theory ..... 11\n"
+                        "2.1 Hohenberg-Kohn Theorem ..... 11"
+                    ),
+                    "block_bbox": [100, 200, 780, 290],
+                },
+            ],
+            "layout_det_res": {"boxes": []},
+        },
+        "markdown": {"text": "", "images": {}},
+        "outputImages": {},
+        "inputImage": "",
+    }
+
+    document = build_paddle_document(
+        {
+            "layoutParsingResults": [page_payload],
+            "dataInfo": {"pages": [{"width": 1200, "height": 1600}]},
+            "preprocessedImages": [""],
+        },
+        document_id="toc-doc",
+        source_json_path=PADDLE_FIXTURE_JSON,
+        provider_version="PaddleOCR-VL",
+    )
+    block = document["pages"][0]["blocks"][0]
+
+    assert block["layout_role"] == "toc"
+    assert block["semantic_role"] == "table_of_contents"
+    assert block["structure_role"] == "table_of_contents"
+    assert block["policy"] == {"translate": True, "translate_reason": "provider_toc_whitelist:content"}
+    assert block["content"]["text_flow"] == "preserve_lines"
+    assert block["content"]["toc_entries"][1]["number"] == "2"
+    assert block["content"]["toc_entries"][1]["title"] == "Foundations of Density Functional Theory"
+    assert block["content"]["toc_entries"][1]["page_label"] == "11"
+
+    items = extract_text_items(document, 0)
+
+    assert len(items) == 1
+    assert items[0].structure_role == "table_of_contents"
+    assert items[0].toc_entries
+
+
 def test_paddle_json_sci_empty_text_slots_stay_on_text_only_repair_path() -> None:
     payload = json.loads(PADDLE_SCI_FIXTURE_JSON.read_text(encoding="utf-8"))
     repaired_pages: dict[int, list[dict]] = {}

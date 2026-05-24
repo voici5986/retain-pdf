@@ -2,7 +2,6 @@ export function createRecentJobsState() {
   return {
     recentJobsOffset: 0,
     recentJobsHasMore: true,
-    recentJobsDate: "",
     recentJobsItems: [],
   };
 }

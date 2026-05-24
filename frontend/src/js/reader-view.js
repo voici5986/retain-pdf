@@ -1,5 +1,7 @@
 import { $ } from "./dom.js";
 
+let lastPageIndicatorText = "";
+
 export function setReaderBootLoading(loading) {
   const loadingEl = $("reader-boot-loading");
   if (!loadingEl) {
@@ -61,10 +63,15 @@ export function setReaderBootProgressText(text) {
 export function setPageIndicator(currentPage, totalPages) {
   const indicator = $("reader-page-indicator");
   if (!indicator || !totalPages) {
+    lastPageIndicatorText = "";
     indicator?.classList.add("hidden");
     return;
   }
-  indicator.textContent = `第 ${currentPage} / ${totalPages} 页`;
+  const text = `第 ${currentPage} / ${totalPages} 页`;
+  if (text !== lastPageIndicatorText) {
+    indicator.textContent = text;
+    lastPageIndicatorText = text;
+  }
   indicator.classList.remove("hidden");
 }
 

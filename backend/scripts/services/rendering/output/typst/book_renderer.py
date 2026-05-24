@@ -21,11 +21,99 @@ from services.rendering.output.typst.book_support import prepare_translated_page
 from services.rendering.output.typst.book_support import resolve_typst_temp_root
 from services.rendering.output.typst.book_support import save_background_pdf_to_output
 from services.rendering.layout.page_specs import build_render_page_specs
+from services.rendering.layout.model.models import RenderPageSpec
 from services.rendering.output.typst.compiler import compile_typst_render_pages_pdf
+from services.rendering.output.typst.color_adapt import apply_adaptive_overlay_colors
 from services.rendering.output.typst.overlay_ops import overlay_translated_items_on_page
 from services.rendering.output.typst.overlay_ops import overlay_translated_pages_on_doc
 from services.rendering.output.typst.sanitize import sanitize_page_specs_for_typst_book_background
 from services.pipeline_shared.events import emit_render_compile_progress
+
+
+_BACKGROUND_SANITIZE_ALL_THRESHOLD = 64
+
+
+def _apply_background_page_color_adapt(
+    *,
+    sample_pdf_path: Path,
+    translated_pages: dict[int, list[dict]],
+    precomputed_colors_by_item_id: dict[str, dict[str, tuple[float, float, float]]] | None = None,
+) -> dict[int, list[dict]]:
+    sample_doc = fitz.open(sample_pdf_path)
+    try:
+        adapted: dict[int, list[dict]] = {}
+        for page_idx, items in translated_pages.items():
+            if 0 <= page_idx < len(sample_doc):
+                adapted[page_idx] = apply_adaptive_overlay_colors(
+                    sample_doc[page_idx],
+                    items,
+                    precomputed_colors_by_item_id=precomputed_colors_by_item_id,
+                )
+            else:
+                adapted[page_idx] = list(items)
+        return adapted
+    finally:
+        sample_doc.close()
+
+
+def _compile_render_page_subset(
+    *,
+    background_pdf_path: Path,
+    page_specs: list,
+    page_indices: list[int],
+    stem: str,
+    font_family: str,
+    font_paths: list[Path] | None,
+    work_dir: Path,
+) -> None:
+    subset_specs = [page_specs[index] for index in page_indices]
+    compile_typst_render_pages_pdf(
+        background_pdf_path=background_pdf_path,
+        page_specs=subset_specs,
+        stem=stem,
+        font_family=font_family,
+        font_paths=font_paths,
+        work_dir=work_dir,
+    )
+
+
+def _locate_bad_render_page_indices(
+    *,
+    background_pdf_path: Path,
+    page_specs: list,
+    font_family: str,
+    font_paths: list[Path] | None,
+    work_dir: Path,
+) -> list[int]:
+    bad_indices: list[int] = []
+    probe_counter = 0
+
+    def probe(indices: list[int]) -> None:
+        nonlocal probe_counter
+        if not indices:
+            return
+        probe_counter += 1
+        try:
+            _compile_render_page_subset(
+                background_pdf_path=background_pdf_path,
+                page_specs=page_specs,
+                page_indices=indices,
+                stem=f"book-background-overlay-probe-{probe_counter:04d}",
+                font_family=font_family,
+                font_paths=font_paths,
+                work_dir=work_dir,
+            )
+            return
+        except RuntimeError:
+            if len(indices) == 1:
+                bad_indices.append(indices[0])
+                return
+            midpoint = len(indices) // 2
+            probe(indices[:midpoint])
+            probe(indices[midpoint:])
+
+    probe(list(range(len(page_specs))))
+    return sorted(set(bad_indices))
 
 
 def _build_overlay_base_doc(source_pdf_path: Path) -> fitz.Document:
@@ -38,6 +126,7 @@ def _build_overlay_base_doc(source_pdf_path: Path) -> fitz.Document:
 def _compile_render_pages_pdf_resilient(
     *,
     source_pdf_path: Path,
+    color_sample_pdf_path: Path,
     background_pdf_path: Path,
     translated_pages: dict[int, list[dict]],
     page_specs: list,
@@ -87,9 +176,37 @@ def _compile_render_pages_pdf_resilient(
         print(str(exc), flush=True)
         emit_render_compile_progress(
             current=2,
-            total=4,
-            message="整本 Typst 渲染编译失败，开始检查不兼容页面",
+            total=5,
+            message="整本 Typst 渲染编译失败，开始定位不兼容页面",
             payload={"render_stage": "background_typst_compile_failed"},
+        )
+        locate_started = time.perf_counter()
+        failed_page_indices = _locate_bad_render_page_indices(
+            background_pdf_path=background_pdf_path,
+            page_specs=page_specs,
+            font_family=font_family,
+            font_paths=font_paths,
+            work_dir=work_dir,
+        )
+        diagnostics["background_bad_page_indices"] = list(failed_page_indices)
+        diagnostics["background_bad_page_count"] = len(failed_page_indices)
+        diagnostics["background_bad_page_locate_elapsed_seconds"] = time.perf_counter() - locate_started
+        if failed_page_indices and len(failed_page_indices) <= _BACKGROUND_SANITIZE_ALL_THRESHOLD:
+            sanitize_page_indices: set[int] | None = set(failed_page_indices)
+            message = f"已定位 {len(failed_page_indices)} 个 Typst 不兼容页面，开始定向修复"
+        else:
+            sanitize_page_indices = None
+            message = "无法小范围定位 Typst 不兼容页面，开始全量修复"
+        emit_render_compile_progress(
+            current=3,
+            total=5,
+            message=message,
+            payload={
+                "render_stage": "background_typst_bad_pages_located",
+                "bad_page_count": len(failed_page_indices),
+                "bad_page_indices": list(failed_page_indices[:50]),
+                "targeted_sanitize": sanitize_page_indices is not None,
+            },
         )
         background_page_specs = collect_background_page_specs(source_pdf_path, translated_pages)
         sanitize_started = time.perf_counter()
@@ -102,15 +219,20 @@ def _compile_render_pages_pdf_resilient(
             font_family=font_family,
             font_paths=font_paths,
             work_dir=work_dir,
+            page_indices=sanitize_page_indices,
         )
         diagnostics["background_sanitize_elapsed_seconds"] = time.perf_counter() - sanitize_started
         emit_render_compile_progress(
-            current=3,
-            total=4,
+            current=4,
+            total=5,
             message="Typst 不兼容页面检查完成，开始重新编译",
             payload={"render_stage": "background_typst_sanitize_done"},
         )
         sanitized_pages = {page_idx: items for page_idx, _w, _h, items in sanitized_background_specs}
+        sanitized_pages = _apply_background_page_color_adapt(
+            sample_pdf_path=color_sample_pdf_path,
+            translated_pages=sanitized_pages,
+        )
         sanitized_render_page_specs = build_render_page_specs(
             source_pdf_path=source_pdf_path,
             translated_pages=sanitized_pages,
@@ -129,8 +251,8 @@ def _compile_render_pages_pdf_resilient(
             time.perf_counter() - sanitized_compile_started
         )
         emit_render_compile_progress(
-            current=4,
-            total=4,
+            current=5,
+            total=5,
             message=f"修复后的整本 Typst 渲染编译完成，共 {len(sanitized_render_page_specs)} 页",
             payload={"render_stage": "background_typst_sanitized_compile_done"},
         )
@@ -202,6 +324,7 @@ def build_book_typst_pdf(
     source_text_precleaned_page_indices: frozenset[int] = frozenset(),
     prebuilt_source_path: Path | None = None,
     source_cleanup_strategy: str = "typst_fill",
+    precomputed_colors_by_item_id: dict[str, dict[str, tuple[float, float, float]]] | None = None,
 ) -> dict[str, object]:
     doc = _build_overlay_base_doc(source_pdf_path)
     try:
@@ -226,6 +349,8 @@ def build_book_typst_pdf(
             source_text_precleaned_page_indices=source_text_precleaned_page_indices,
             prebuilt_source_path=prebuilt_source_path,
             source_base_pdf_path=source_pdf_path,
+            color_sample_pdf_path=indent_detection_pdf_path or source_pdf_path,
+            precomputed_colors_by_item_id=precomputed_colors_by_item_id,
             pikepdf_output_pdf_path=output_pdf_path,
             source_cleanup_strategy=source_cleanup_strategy,
         )
@@ -334,26 +459,44 @@ def build_book_typst_background_pdf(
     effective_inner_bbox_lookup: dict[str, list[float]] | None = None,
     compile_workers: int | None = None,
     source_text_precleaned_page_indices: frozenset[int] = frozenset(),
+    prebuilt_page_specs: list[RenderPageSpec] | None = None,
+    precomputed_colors_by_item_id: dict[str, dict[str, tuple[float, float, float]]] | None = None,
 ) -> dict[str, object]:
     del compile_workers
     diagnostics: dict[str, object] = {"mode": "typst"}
     total_started = time.perf_counter()
     work_dir = prepare_background_work_dir(output_pdf_path, temp_root)
-    prepare_started = time.perf_counter()
-    translated_pages = prepare_translated_pages_for_render(
-        indent_detection_pdf_path or source_pdf_path,
-        translated_pages,
-        first_line_indent_lookup=first_line_indent_lookup,
-        effective_inner_bbox_lookup=effective_inner_bbox_lookup,
-    )
-    diagnostics["background_prepare_elapsed_seconds"] = time.perf_counter() - prepare_started
-    specs_started = time.perf_counter()
-    page_specs = build_render_page_specs(
-        source_pdf_path=source_pdf_path,
-        translated_pages=translated_pages,
-        prepared=True,
-    )
-    diagnostics["background_page_specs_elapsed_seconds"] = time.perf_counter() - specs_started
+    color_sample_pdf_path = indent_detection_pdf_path or source_pdf_path
+    if prebuilt_page_specs:
+        page_specs = prebuilt_page_specs
+        diagnostics["background_prepare_elapsed_seconds"] = 0.0
+        diagnostics["background_color_adapt_elapsed_seconds"] = 0.0
+        diagnostics["background_page_specs_elapsed_seconds"] = 0.0
+        diagnostics["background_page_specs_prewarm_hit"] = True
+    else:
+        prepare_started = time.perf_counter()
+        translated_pages = prepare_translated_pages_for_render(
+            indent_detection_pdf_path or source_pdf_path,
+            translated_pages,
+            first_line_indent_lookup=first_line_indent_lookup,
+            effective_inner_bbox_lookup=effective_inner_bbox_lookup,
+        )
+        diagnostics["background_prepare_elapsed_seconds"] = time.perf_counter() - prepare_started
+        color_started = time.perf_counter()
+        translated_pages = _apply_background_page_color_adapt(
+            sample_pdf_path=color_sample_pdf_path,
+            translated_pages=translated_pages,
+            precomputed_colors_by_item_id=precomputed_colors_by_item_id,
+        )
+        diagnostics["background_color_adapt_elapsed_seconds"] = time.perf_counter() - color_started
+        specs_started = time.perf_counter()
+        page_specs = build_render_page_specs(
+            source_pdf_path=source_pdf_path,
+            translated_pages=translated_pages,
+            prepared=True,
+        )
+        diagnostics["background_page_specs_elapsed_seconds"] = time.perf_counter() - specs_started
+        diagnostics["background_page_specs_prewarm_hit"] = False
     page_map = RenderPageMap.from_page_specs(page_specs)
     cleanup_started = time.perf_counter()
     cleaned_background_pdf = build_clean_background_pdf(
@@ -367,6 +510,7 @@ def build_book_typst_background_pdf(
     diagnostics["background_source_cleanup_elapsed_seconds"] = time.perf_counter() - cleanup_started
     background_pdf, compile_diagnostics = _compile_render_pages_pdf_resilient(
         source_pdf_path=source_pdf_path,
+        color_sample_pdf_path=color_sample_pdf_path,
         background_pdf_path=cleaned_background_pdf,
         translated_pages=translated_pages,
         page_specs=page_specs,

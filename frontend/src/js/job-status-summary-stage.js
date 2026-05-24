@@ -1,4 +1,5 @@
 import { stageGroupForRawStage } from "./job-stage-contract.js";
+import { normalizeUserStage } from "./job-stage-presentation-utils.js";
 import { firstNonEmpty, looksLikeProviderPercentProgress } from "./job-status-summary-helpers.js";
 import {
   DETAIL_TEXT_MAP,
@@ -12,7 +13,7 @@ function rawStageOf(payload) {
 }
 
 function stageKeyOf(payload) {
-  const explicitUserStage = firstNonEmpty(payload.user_stage, payload.payload?.user_stage).toLowerCase();
+  const explicitUserStage = normalizeUserStage(firstNonEmpty(payload.user_stage, payload.payload?.user_stage));
   if (["ocr", "translate", "render", "done"].includes(explicitUserStage)) {
     return explicitUserStage;
   }

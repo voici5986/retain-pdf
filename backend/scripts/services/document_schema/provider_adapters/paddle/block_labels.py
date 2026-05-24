@@ -11,6 +11,8 @@ def map_block_kind(raw_label: str, *, text: str = "") -> tuple[str, str, list[st
         return "text", "body", [], {}
     if label == "paragraph_title":
         return "text", "heading", ["heading"], {}
+    if label == "content":
+        return "text", "table_of_contents", ["table_of_contents", "toc"], {}
     if label == "reference_content":
         return "text", "reference_entry", ["reference_entry", "reference_zone", "skip_translation"], {}
     if label == "formula_number":

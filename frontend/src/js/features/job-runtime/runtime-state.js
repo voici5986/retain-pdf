@@ -1,6 +1,7 @@
 export const JOB_EVENTS_PAGE_SIZE = 200;
+export const JOB_EVENTS_PREVIEW_PAGE_SIZE = 500;
 export const JOB_POLL_INTERVAL_MS = 1000;
-export const JOB_EVENTS_REFRESH_MS = 1000;
+export const JOB_EVENTS_REFRESH_MS = 2500;
 export const JOB_MANIFEST_REFRESH_MS = 5000;
 export const JOB_STAGE_ACTIONS_REFRESH_MS = 5000;
 
@@ -9,6 +10,10 @@ export function stopPolling(state) {
     clearInterval(state.timer);
     state.timer = null;
   }
+  state.currentJobPollInFlight = false;
+  state.currentJobEventsFetchInFlight = false;
+  state.currentJobManifestFetchInFlight = false;
+  state.currentJobStageActionsFetchInFlight = false;
 }
 
 export async function fetchAllJobEvents({ fetchJobEvents, apiPrefix, jobId }) {
@@ -28,6 +33,10 @@ export async function fetchAllJobEvents({ fetchJobEvents, apiPrefix, jobId }) {
     }
     offset += batch.length;
   }
+}
+
+export async function fetchRecentJobEvents({ fetchJobEvents, apiPrefix, jobId }) {
+  return await fetchJobEvents(jobId, apiPrefix, JOB_EVENTS_PREVIEW_PAGE_SIZE, 0);
 }
 
 export function cachedEventsFor(state, jobId) {

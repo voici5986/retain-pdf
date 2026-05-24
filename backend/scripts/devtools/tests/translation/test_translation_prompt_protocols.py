@@ -296,11 +296,16 @@ def test_build_messages_direct_typst_includes_inline_math_and_local_ocr_repair_g
     assert "当前启用 direct_typst 公式直出模式" in system_prompt
     assert "请先理解整句语义" in system_prompt
     assert "请主动用 `$...$` 包裹" in system_prompt
+    assert "每个 `$...$` inline 公式前后都要和正文用空格隔开" in system_prompt
+    assert "$...$ $...$" in system_prompt
+    assert "$...$$...$" in system_prompt
     assert "只能使用单个反斜杠" in system_prompt
     assert r"\text{g}" in system_prompt
     assert r"\\text{g}" in system_prompt
     assert r"\cite{117}" in system_prompt
-    assert "上标引用" in system_prompt
+    assert "Unicode 上标字符" in system_prompt
+    assert "$^{117}$" in system_prompt
+    assert "$^{26-28}$" in system_prompt
     assert "最小修复" in system_prompt
     assert "不要补写缺失的正文内容" in system_prompt
     assert "<<<ITEM item_id=ITEM_ID>>>" in system_prompt
@@ -325,11 +330,16 @@ def test_build_single_item_fallback_messages_direct_typst_includes_inline_math_a
     assert "当前启用 direct_typst 公式直出模式" in system_prompt
     assert "请先理解整句语义" in system_prompt
     assert "请主动用 `$...$` 包裹" in system_prompt
+    assert "每个 `$...$` inline 公式前后都要和正文用空格隔开" in system_prompt
+    assert "$...$ $...$" in system_prompt
+    assert "$...$$...$" in system_prompt
     assert "只能使用单个反斜杠" in system_prompt
     assert r"\text{g}" in system_prompt
     assert r"\\text{g}" in system_prompt
     assert r"\cite{117}" in system_prompt
-    assert "上标引用" in system_prompt
+    assert "Unicode 上标字符" in system_prompt
+    assert "$^{117}$" in system_prompt
+    assert "$^{26-28}$" in system_prompt
     assert "最小修复" in system_prompt
     assert "不要补写缺失的正文内容" in system_prompt
     assert r"\mu" in messages[1]["content"]
@@ -366,6 +376,31 @@ def test_build_single_item_fallback_messages_direct_typst_keeps_single_backslash
     )
     assert r"\mathrm{Ni(I) / Ni(III)}" in messages[1]["content"]
     assert r"\\mathrm{Ni(I) / Ni(III)}" not in messages[1]["content"]
+
+
+def test_body_direct_typst_prompt_does_not_preserve_ocr_visual_lines() -> None:
+    messages = deepseek_client.build_single_item_fallback_messages(
+        {
+            "item_id": "p005-b025",
+            "source_text": "For large $ CN_{A}^{\\prime} $ values, this d-level is lowered.",
+            "protected_source_text": "For large $ CN_{A}^{\\prime} $ values, this d-level is lowered.",
+            "source_line_texts": [
+                "For large $ CN_{A}^{\\prime}",
+                "$ values, this d-level is lowered.",
+            ],
+            "text_flow": "preserve_lines",
+            "math_mode": "direct_typst",
+            "semantic_role": "body",
+            "structure_role": "body",
+            "metadata": {"structure_role": "body"},
+        },
+        mode="sci",
+        response_style="plain_text",
+    )
+
+    assert "结构提示：当前原文是多行结构块" not in messages[1]["content"]
+    assert "For large $ CN_{A}^{\\prime} $ values, this d-level is lowered." in messages[1]["content"]
+    assert "For large $ CN_{A}^{\\prime}\n$ values" not in messages[1]["content"]
 
 
 def test_prompt_builder_can_render_non_default_target_language() -> None:

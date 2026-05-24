@@ -3,7 +3,7 @@ import {
   stageSubtypeOf,
 } from "./job-status-summary.js";
 import { progressFromEvent } from "./job-stage-event-progress.js";
-import { stageRank } from "./job-stage-presentation-utils.js";
+import { normalizeUserStage, stageRank } from "./job-stage-presentation-utils.js";
 
 function strongestStageKey(...payloads) {
   return payloads
@@ -27,7 +27,7 @@ export function latestStageEvent(job, eventsPayload) {
       const item = items[index] || {};
       const itemStage = `${item.stage || ""}`.trim();
       const providerStage = `${item.provider_stage || ""}`.trim();
-      const userStage = `${item.user_stage || item.payload?.user_stage || ""}`.trim();
+      const userStage = normalizeUserStage(item.user_stage || item.payload?.user_stage || "");
       const itemStageForMatch = itemStage || providerStage || userStage;
       if (!itemStageForMatch) {
         continue;
@@ -71,7 +71,7 @@ export function latestStageEvent(job, eventsPayload) {
         const item = items[index] || {};
         const itemStage = `${item.stage || ""}`.trim();
         const providerStage = `${item.provider_stage || ""}`.trim();
-        const userStage = `${item.user_stage || item.payload?.user_stage || ""}`.trim();
+        const userStage = normalizeUserStage(item.user_stage || item.payload?.user_stage || "");
         const itemStageForMatch = itemStage || providerStage || userStage;
         if (!itemStageForMatch) {
           continue;

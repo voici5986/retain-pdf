@@ -210,10 +210,14 @@ def sanitize_page_specs_for_typst_book_background(
     font_paths: list[Path] | None = None,
     work_dir: Path | None = None,
     page_diagnostics: list[dict] | None = None,
+    page_indices: set[int] | None = None,
 ) -> list[tuple[int, float, float, list[dict]]]:
     work_dir = work_dir or TYPST_OVERLAY_DIR
     sanitized_specs: list[tuple[int, float, float, list[dict]]] = []
     for page_index, (source_page_idx, page_width, page_height, translated_items) in enumerate(page_specs):
+        if page_indices is not None and page_index not in page_indices:
+            sanitized_specs.append((source_page_idx, page_width, page_height, translated_items))
+            continue
         diagnostics = (
             {"page_index": page_index, "source_page_idx": source_page_idx, "stem": f"{stem}-page-{page_index:03d}"}
             if page_diagnostics is not None

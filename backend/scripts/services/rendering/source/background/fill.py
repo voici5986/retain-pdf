@@ -8,6 +8,9 @@ from services.rendering.source.background.config import BACKGROUND_COVER_COMPLEX
 from services.rendering.source.background.config import BACKGROUND_COVER_MIN_SAMPLE_PIXELS
 from services.rendering.source.background.config import BACKGROUND_COVER_SAMPLE_MARGIN_PT
 from services.rendering.source.background.config import BACKGROUND_COVER_SAMPLE_SCALE
+from services.rendering.source.background.config import BACKGROUND_FILL_DOMINANT_BIN_SIZE
+from services.rendering.source.background.config import BACKGROUND_FILL_DOMINANT_MIN_RATIO
+from services.rendering.source.background.config import BACKGROUND_FILL_NONWHITE_MAX_CHANNEL
 from services.rendering.source.background.config import BACKGROUND_PATCH_LIGHT_BG_MEDIAN_MIN
 from services.rendering.source.background.config import BACKGROUND_PATCH_LIGHT_BG_P90_MIN
 from services.rendering.source.background.config import BACKGROUND_PATCH_TEXT_CONTAMINATION_DARK_RATIO
@@ -106,14 +109,74 @@ def _robust_fill_from_pixels(pixels: list[tuple[int, int, int]]) -> tuple[float,
     )
 
 
+def _dominant_nonwhite_fill_from_pixels(pixels: list[tuple[int, int, int]]) -> tuple[float, float, float] | None:
+    if len(pixels) < BACKGROUND_COVER_MIN_SAMPLE_PIXELS:
+        return None
+    bin_size = max(1, BACKGROUND_FILL_DOMINANT_BIN_SIZE)
+    bins: dict[tuple[int, int, int], list[tuple[int, int, int]]] = {}
+    for r, g, b in pixels:
+        key = (r // bin_size, g // bin_size, b // bin_size)
+        bins.setdefault(key, []).append((r, g, b))
+    if not bins:
+        return None
+    dominant = max(bins.values(), key=len)
+    if len(dominant) / max(len(pixels), 1) < BACKGROUND_FILL_DOMINANT_MIN_RATIO:
+        return None
+    rs = sorted(pixel[0] for pixel in dominant)
+    gs = sorted(pixel[1] for pixel in dominant)
+    bs = sorted(pixel[2] for pixel in dominant)
+    fill = (
+        quantile(rs, 1, 2) / 255.0,
+        quantile(gs, 1, 2) / 255.0,
+        quantile(bs, 1, 2) / 255.0,
+    )
+    if max(fill) >= BACKGROUND_FILL_NONWHITE_MAX_CHANNEL:
+        return None
+    return fill
+
+
+def _sample_clean_neighbor_fill(page: fitz.Page, rect: fitz.Rect) -> tuple[float, float, float] | None:
+    best_fill: tuple[float, float, float] | None = None
+    best_score: tuple[int, int, float] | None = None
+    for candidate in _patch_candidate_rects(fitz.Rect(page.rect), rect):
+        pix = _clip_pixmap(page, candidate)
+        if pix is None:
+            continue
+        pixels = _pixmap_rgb_pixels(pix)
+        if len(pixels) < BACKGROUND_COVER_MIN_SAMPLE_PIXELS:
+            continue
+        if _looks_like_text_contaminated_light_patch(pixels):
+            continue
+        fill = _robust_fill_from_pixels(pixels)
+        if fill is None:
+            continue
+        spread = _brightness_spread(pixels)
+        complexity_bucket = 0 if spread <= BACKGROUND_COVER_COMPLEXITY_BRIGHTNESS_SPREAD else 1
+        score = (complexity_bucket, spread, -rect_area(candidate))
+        if best_score is None or score < best_score:
+            best_score = score
+            best_fill = fill
+    if best_score is not None and best_score[0] <= 0:
+        return best_fill
+    return None
+
+
 def sample_local_background_fill(page: fitz.Page, rect: fitz.Rect) -> tuple[float, float, float]:
+    inner_pix = _clip_pixmap(page, rect)
+    if inner_pix is not None:
+        inner_fill = _dominant_nonwhite_fill_from_pixels(_pixmap_rgb_pixels(inner_pix))
+        if inner_fill is not None:
+            return inner_fill
+
     outer = _background_sample_outer_rect(page, rect)
     if outer is None:
-        return (1, 1, 1)
+        clean_neighbor_fill = _sample_clean_neighbor_fill(page, rect)
+        return clean_neighbor_fill or (1, 1, 1)
 
     pix = _clip_pixmap(page, outer)
     if pix is None or pix.width <= 0 or pix.height <= 0 or pix.n < 3:
-        return (1, 1, 1)
+        clean_neighbor_fill = _sample_clean_neighbor_fill(page, rect)
+        return clean_neighbor_fill or (1, 1, 1)
 
     inner_x0 = (rect.x0 - outer.x0) / max(outer.width, 1e-6) * pix.width
     inner_y0 = (rect.y0 - outer.y0) / max(outer.height, 1e-6) * pix.height
@@ -134,11 +197,13 @@ def sample_local_background_fill(page: fitz.Page, rect: fitz.Rect) -> tuple[floa
 
     robust_fill = _robust_fill_from_pixels(pixels)
     if len(pixels) < BACKGROUND_COVER_MIN_SAMPLE_PIXELS:
-        return robust_fill or (1, 1, 1)
+        clean_neighbor_fill = _sample_clean_neighbor_fill(page, rect)
+        return robust_fill or clean_neighbor_fill or (1, 1, 1)
 
     spread = _brightness_spread(pixels)
     if spread > BACKGROUND_COVER_COMPLEXITY_BRIGHTNESS_SPREAD:
-        return robust_fill or (1, 1, 1)
+        clean_neighbor_fill = _sample_clean_neighbor_fill(page, rect)
+        return robust_fill or clean_neighbor_fill or (1, 1, 1)
 
     rs = sorted(r for r, _g, _b in pixels)
     gs = sorted(g for _r, g, _b in pixels)

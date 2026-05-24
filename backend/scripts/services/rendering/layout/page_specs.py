@@ -43,10 +43,13 @@ def _layout_block_from_render_block(block, *, page_index: int) -> RenderLayoutBl
         fit_shift_up_pt=block.fit_shift_up_pt,
         first_line_indent_pt=block.first_line_indent_pt,
         justify_text=block.justify_text,
+        text_color=block.text_color,
+        cover_fill=block.cover_fill,
         use_cover_fill=block.use_cover_fill,
         skip_reason=block.skip_reason,
         preserve_line_breaks=block.preserve_line_breaks,
         preserved_line_boxes=list(block.preserved_line_boxes or []),
+        toc_entries=list(block.toc_entries or []),
     )
 
 

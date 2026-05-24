@@ -120,7 +120,14 @@ export function setReaderFrameSource(url = "about:blank") {
   }
   const frame = $("reader-dialog-frame");
   if (frame) {
-    frame.src = url;
+    const normalizedUrl = `${url || ""}`.trim();
+    if (!normalizedUrl || normalizedUrl === "about:blank") {
+      frame.removeAttribute("src");
+      frame.setAttribute("srcdoc", "<style>html,body{margin:0;min-height:100%;background:#f3f4f6;color:#1d1d1f}</style>");
+      return;
+    }
+    frame.removeAttribute("srcdoc");
+    frame.src = normalizedUrl;
   }
 }
 

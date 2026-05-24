@@ -17,6 +17,7 @@ from services.translation.core.terms import matched_glossary_entries
 from services.translation.core.terms import normalize_glossary_entries
 from services.translation.services.postprocess import garbled_reconstruction
 from services.translation.services.context import session_context
+from services.document_schema.text_flow import classify_text_flow_for_role
 
 
 def test_continuation_review_uses_strict_json_schema_format() -> None:
@@ -115,6 +116,55 @@ def test_garbled_reconstruction_rejects_invalid_llm_output() -> None:
     assert "english_residue" in diagnostics["garbled_reconstruction_issue_kinds"]
 
 
+def test_garbled_reconstruction_uses_injected_runtime() -> None:
+    calls: list[dict] = []
+
+    def fake_request_chat_content(messages, **kwargs):
+        calls.append({"messages": messages, **kwargs})
+        return '{"translated_text":"自洽场过程会计算分子轨道。"}'
+
+    item = {
+        "item_id": "p003-b009",
+        "page_idx": 2,
+        "block_type": "text",
+        "block_kind": "text",
+        "should_translate": True,
+        "source_text": (
+            "ASMALL self-consistent field procedure computes molecular orbitals before final energy "
+            "is evaluated for the electronic structure calculation."
+        ),
+        "translation_unit_protected_source_text": (
+            "ASMALL self-consistent field procedure computes molecular orbitals before final energy "
+            "is evaluated for the electronic structure calculation."
+        ),
+        "translation_unit_protected_translated_text": "",
+        "final_status": "failed",
+    }
+    runtime = garbled_reconstruction.GarbledReconstructionRuntime(
+        api_key="test-key",
+        model="test-model",
+        base_url="https://example.test/v1",
+        provider_reason="test",
+        request_chat_content_fn=fake_request_chat_content,
+    )
+
+    summary = garbled_reconstruction.reconstruct_garbled_page_payloads(
+        {2: [item]},
+        api_key="ignored",
+        model="ignored",
+        base_url="ignored",
+        workers=1,
+        runtime=runtime,
+    )
+
+    assert summary["garbled_candidates"] == 1
+    assert summary["garbled_reconstructed"] == 1
+    assert summary["dirty_pages"] == [2]
+    assert calls[0]["api_key"] == "test-key"
+    assert calls[0]["model"] == "test-model"
+    assert item["final_status"] == "translated"
+
+
 def test_domain_context_cache_round_trip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         output_dir = Path(tmp)
@@ -134,6 +184,48 @@ def test_domain_context_raw_response_round_trip() -> None:
         output_dir = Path(tmp)
         path = domain_context.save_domain_context_raw(output_dir, "raw model response")
         assert path.read_text(encoding="utf-8") == "raw model response"
+
+
+def test_body_text_flow_ignores_ocr_visual_line_breaks() -> None:
+    text = "\n".join(
+        [
+            "The EHT-type term in GFN2-xTB is mostly responsible for",
+            "covalent binding. Via the coordination number dependence",
+            "of the valence energy levels, these obtain additional flexibility",
+        ]
+    )
+
+    assert (
+        classify_text_flow_for_role(
+            text=text,
+            lines=[],
+            semantic_role="body",
+            structure_role="body",
+        )
+        == "flow"
+    )
+
+
+def test_body_translation_context_does_not_feed_visual_lines_to_prompt() -> None:
+    context = build_item_context(
+        {
+            "item_id": "p005-b025",
+            "source_text": "The EHT-type term in GFN2-xTB is mostly responsible for covalent binding.",
+            "protected_source_text": "The EHT-type term in GFN2-xTB is mostly responsible for covalent binding.",
+            "source_line_texts": [
+                "The EHT-type term in GFN2-xTB is mostly responsible for",
+                "covalent binding.",
+            ],
+            "text_flow": "preserve_lines",
+            "semantic_role": "body",
+            "structure_role": "body",
+            "metadata": {"structure_role": "body"},
+        }
+    )
+
+    assert context.source_for_prompt() == "The EHT-type term in GFN2-xTB is mostly responsible for covalent binding."
+    assert context.as_batch_payload()["source_text"] == context.source_for_prompt()
+    assert "instruction" not in context.as_batch_payload()
 
 
 def test_translation_control_context_merges_terms_retrieval_and_extra_guidance() -> None:

@@ -9,6 +9,7 @@ sys.path.insert(0, str(REPO_SCRIPTS_ROOT))
 
 
 from services.translation.llm import placeholder_guard
+from services.translation.llm.providers.deepseek.client import _extract_stream_delta_text
 from services.translation.llm.shared import cache
 from services.translation.llm.shared.orchestration import segment_routing
 from services.translation.llm.shared.orchestration.intentional_keep_origin import (
@@ -64,6 +65,49 @@ def test_apply_translation_salvages_reasoning_leak_final_answer() -> None:
     assert payload[0]["translated_text"] == "具有径向响应函数 $K$ 和相应的非均匀项 $Q_{\\mathrm{xc}}$，"
     assert payload[0]["final_status"] == "partially_translated"
     assert payload[0]["translation_diagnostics"]["degradation_reason"] == "reasoning_leak_salvaged"
+
+
+def test_apply_translation_salvages_quoted_reasoning_choice() -> None:
+    payload = [
+        {
+            "item_id": "p135-b009",
+            "page_idx": 134,
+            "block_type": "text",
+            "block_kind": "text",
+            "source_text": "The time-ordered response has to be distinguished from the retarded response function,",
+            "protected_source_text": "The time-ordered response has to be distinguished from the retarded response function,",
+            "should_translate": True,
+            "formula_map": [],
+            "protected_map": [],
+        }
+    ]
+    leaked = (
+        '函数需要加"函数"吗？原文是"time-ordered response"，但后面有"response function"。'
+        '为保准确，可以译为"时间有序响应（函数）必须与推迟响应函数加以区分"，但可能冗余。'
+        '更简洁：直接"时间有序响应必须与推迟响应函数加以区分"，因为后者明确是函数。'
+        '\n\n考虑到学术规范，使用"加以区分"更正式。我选择："时间有序响应必须与推迟响应函数加以区分，"'
+    )
+
+    apply_translated_text_map(payload, {"p135-b009": leaked})
+
+    assert payload[0]["translated_text"] == "时间有序响应必须与推迟响应函数加以区分，"
+    assert payload[0]["final_status"] == "partially_translated"
+    assert payload[0]["translation_diagnostics"]["degradation_reason"] == "reasoning_leak_salvaged"
+
+
+def test_deepseek_stream_delta_ignores_reasoning_content() -> None:
+    data = {
+        "choices": [
+            {
+                "delta": {
+                    "reasoning_content": "这里是模型思考，不应该进入译文。",
+                    "content": "时间有序响应必须与推迟响应函数加以区分，",
+                }
+            }
+        ]
+    }
+
+    assert _extract_stream_delta_text(data) == "时间有序响应必须与推迟响应函数加以区分，"
 
 
 def test_apply_translation_trims_direct_typst_neighbor_continuation_leak() -> None:

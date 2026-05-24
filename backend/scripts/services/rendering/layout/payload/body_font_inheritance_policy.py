@@ -9,6 +9,7 @@ from services.rendering.layout.payload.body_common import SHORT_BODY_INHERIT_MAX
 from services.rendering.layout.payload.body_common import body_context_anchors
 from services.rendering.layout.payload.body_common import payload_density
 from services.rendering.layout.payload.body_common import payload_height
+from services.rendering.layout.payload.body_common import payload_is_continuation_member
 from services.rendering.layout.payload.body_common import payload_width
 from services.rendering.layout.payload.body_common import required_lines
 from services.rendering.layout.payload.body_common import same_body_column
@@ -90,6 +91,8 @@ def inherit_low_height_body_fonts(
 
 
 def _is_short_body_inherit_candidate(payload: dict, *, page_text_width_med: float) -> bool:
+    if payload_is_continuation_member(payload):
+        return False
     if payload["render_kind"] != "markdown":
         return False
     item = payload.get("item") or {}
@@ -111,6 +114,8 @@ def _is_short_body_inherit_candidate(payload: dict, *, page_text_width_med: floa
 
 
 def _is_low_height_body_inherit_candidate(payload: dict) -> bool:
+    if payload_is_continuation_member(payload):
+        return False
     if payload["render_kind"] != "markdown":
         return False
     if payload["heavy_dense_small_box"] and payload_density(payload) > LOW_HEIGHT_BODY_INHERIT_DENSITY_LIMIT:

@@ -91,14 +91,18 @@ def translate_book_with_global_continuations(
     if context_window_updates:
         print(f"book: translation context windows updated={context_window_updates}", flush=True)
     save_pages(page_payloads, translation_paths)
-    if render_prewarm_start_fn is not None:
+    def _start_render_prewarm(label: str) -> None:
+        if render_prewarm_start_fn is None:
+            return
         try:
             handle = render_prewarm_start_fn(page_payloads)
             if render_prewarm_handle_sink is not None:
                 render_prewarm_handle_sink(handle)
-            print("book: render prewarm started", flush=True)
+            print(f"book: render prewarm started ({label})", flush=True)
         except Exception as exc:
-            print(f"book: render prewarm start failed {type(exc).__name__}: {exc}", flush=True)
+            print(f"book: render prewarm start failed ({label}) {type(exc).__name__}: {exc}", flush=True)
+
+    _start_render_prewarm("source")
 
     run_translation_batch_stage(
         page_payloads=page_payloads,
@@ -143,6 +147,7 @@ def translate_book_with_global_continuations(
         translation_context=translation_context,
         workers=workers,
     )
+    _start_render_prewarm("translated")
 
     translated_pages_map = {page_idx: load_translations(translation_paths[page_idx]) for page_idx in sorted(page_payloads)}
     summaries = build_page_summaries(

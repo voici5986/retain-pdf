@@ -30,6 +30,10 @@ def _render_should_use_unit_translation(item: dict) -> bool:
     return render_unit_kind(item) == "group" or bool(render_continuation_group_id(item))
 
 
+def _member_translation_text(item: dict) -> str:
+    return str(item.get("protected_translated_text") or item.get("translated_text") or "").strip()
+
+
 def render_protected_translation_text(item: dict) -> str:
     if not _render_should_use_unit_translation(item):
         text = (
@@ -39,6 +43,8 @@ def render_protected_translation_text(item: dict) -> str:
             or item.get("translation_unit_translated_text")
             or ""
         )
+    elif render_continuation_group_id(item) and _member_translation_text(item):
+        text = _member_translation_text(item)
     else:
         text = (
             item.get("translation_unit_protected_translated_text")
@@ -122,8 +128,16 @@ def seed_render_fields(item: dict) -> None:
 
 def group_render_unit_items(items: Iterable[dict]) -> dict[str, list[dict]]:
     units: dict[str, list[dict]] = {}
-    for item in items:
+    continuation_units_with_member_text: set[str] = set()
+    materialized_items = list(items)
+    for item in materialized_items:
+        unit_id = render_continuation_group_id(item)
+        if unit_id and _member_translation_text(item):
+            continuation_units_with_member_text.add(unit_id)
+    for item in materialized_items:
         unit_id = render_continuation_group_id(item) or render_translation_unit_id(item)
+        if render_continuation_group_id(item) in continuation_units_with_member_text:
+            continue
         if _render_should_use_unit_translation(item) and unit_id:
             units.setdefault(unit_id, []).append(item)
     return units

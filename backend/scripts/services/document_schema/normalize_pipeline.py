@@ -17,6 +17,7 @@ from services.document_schema import DOCUMENT_SCHEMA_REPORT_FILE_NAME
 from services.document_schema import adapt_path_to_document_v1_with_report
 from services.document_schema import validate_saved_document_path
 from services.document_schema.reporting import build_normalization_summary
+from services.document_schema.toc import build_toc_entries
 from services.document_schema.provider_adapters.paddle.content_extract import build_lines as build_paddle_lines
 from services.document_schema.provider_adapters.paddle.content_extract import tighten_text_bbox as tighten_paddle_text_bbox
 
@@ -135,6 +136,15 @@ def _post_rescale_rebuild_paddle_text_geometry(document: dict) -> dict:
             )
             if rebuilt_lines:
                 block["lines"] = rebuilt_lines
+                content = block.get("content") or {}
+                if str(block.get("structure_role", "") or "").strip().lower() == "table_of_contents":
+                    line_texts = content.get("line_texts") or []
+                    if isinstance(line_texts, list):
+                        toc_entries = build_toc_entries(lines=rebuilt_lines, line_texts=[str(line) for line in line_texts])
+                        if toc_entries:
+                            content["toc_entries"] = toc_entries
+                            content["text_flow"] = "preserve_lines"
+                            block["content"] = content
     return document
 
 

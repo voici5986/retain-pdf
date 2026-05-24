@@ -10,10 +10,6 @@ export function recentJobsDialogTemplate() {
           <button id="query-dialog-close-btn" type="submit" class="dialog-close-btn" aria-label="关闭">×</button>
         </div>
         <div class="recent-jobs-sidebar-body">
-          <div class="recent-jobs-toolbar">
-            <input id="recent-jobs-date" type="date" aria-label="选择日期" />
-            <button id="refresh-jobs-btn" class="secondary" type="button">刷新列表</button>
-          </div>
           <div id="recent-jobs-summary" class="status-panel-note">Stage Spec 0 · Legacy CLI 0 · Unknown 0</div>
           <div id="recent-jobs-empty" class="events-empty hidden">暂无最近任务</div>
           <div id="recent-jobs-list" class="recent-jobs-list hidden"></div>

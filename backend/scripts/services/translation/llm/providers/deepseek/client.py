@@ -318,9 +318,6 @@ def _extract_stream_delta_text(data: dict[str, Any]) -> str:
             content = delta.get("content")
             if isinstance(content, str) and content:
                 chunks.append(content)
-            reasoning_content = delta.get("reasoning_content")
-            if isinstance(reasoning_content, str) and reasoning_content:
-                chunks.append(reasoning_content)
             continue
         message = choice.get("message")
         if isinstance(message, dict):

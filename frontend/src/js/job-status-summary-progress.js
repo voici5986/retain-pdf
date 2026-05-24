@@ -4,6 +4,7 @@ import {
   numberOrNull,
   progressFromText,
 } from "./job-status-summary-helpers.js";
+import { progressUnitOf } from "./job-stage-presentation-utils.js";
 import { stageKeyOf, stageSubtypeOf, userStageFor } from "./job-status-summary-stage.js";
 
 export function summarizeStageProgressText(payload) {
@@ -20,7 +21,13 @@ export function summarizeStageProgressText(payload) {
   const stageKey = stageKeyOf(payload);
   const subtype = stageSubtypeOf(payload);
   const stage = userStageFor(payload);
-  const progressUnit = firstNonEmpty(payload.progress_unit, payload.payload?.progress_unit).toLowerCase();
+  const progressUnit = progressUnitOf(payload) || firstNonEmpty(payload.progress_unit, payload.payload?.progress_unit).toLowerCase();
+  if (stage.key === "render" && subtype === "render_compile") {
+    return `编译 ${current}/${total}`;
+  }
+  if (stage.key === "render" && subtype === "render_prepare") {
+    return `准备 ${current}/${total}`;
+  }
   if (progressUnit === "page") {
     if (stage.key === "ocr" && current <= 0) {
       return `OCR 处理中，共 ${total} 页`;
@@ -37,12 +44,6 @@ export function summarizeStageProgressText(payload) {
     return `第 ${current}/${total} 批`;
   }
   if (progressUnit === "step") {
-    if (stage.key === "render" && subtype === "render_prepare") {
-      return `准备 ${current}/${total}`;
-    }
-    if (stage.key === "render" && subtype === "render_compile") {
-      return `编译 ${current}/${total}`;
-    }
     return `进度 ${current}/${total}`;
   }
   if (progressUnit === "percent") {

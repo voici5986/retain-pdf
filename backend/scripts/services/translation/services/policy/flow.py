@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from services.translation.services.context import TranslationDocumentContext
 from services.translation.services.policy.config import TranslationPolicyConfig
 from services.translation.services.policy.config import build_translation_policy_config
@@ -53,6 +55,7 @@ def apply_translation_policies(
     sci_cutoff_page_idx: int | None,
     sci_cutoff_block_idx: int | None,
     policy_config: TranslationPolicyConfig | None = None,
+    request_chat_content_fn: Callable[..., str] | None = None,
 ) -> tuple[int, dict[str, int]]:
     if policy_config is None:
         policy_config = build_translation_policy_config(
@@ -86,6 +89,7 @@ def apply_translation_policies(
                 base_url=base_url,
                 batch_size=classify_batch_size,
                 request_label=f"classification page {page_idx + 1}",
+                request_chat_content_fn=request_chat_content_fn,
             )
         except Exception as exc:
             print(

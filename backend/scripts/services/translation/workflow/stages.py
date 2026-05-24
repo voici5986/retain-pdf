@@ -4,6 +4,10 @@ import os
 import time
 from pathlib import Path
 
+from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL
+from services.translation.llm.shared.provider_runtime import DEFAULT_MODEL
+from services.translation.llm.shared.provider_runtime import get_api_key
+from services.translation.llm.shared.provider_runtime import normalize_base_url
 from services.translation.llm.shared.provider_runtime import request_chat_content
 from services.translation.artifacts import blocking_untranslated_items
 from services.translation.services.agents import AgentRunContext
@@ -21,6 +25,7 @@ from services.pipeline_shared.events import emit_stage_transition
 from services.translation.artifacts import TranslationRunDiagnostics
 from services.translation.llm.shared.control_context import TranslationControlContext
 from services.translation.services.policy import TranslationPolicyConfig
+from services.translation.services.postprocess import GarbledReconstructionRuntime
 from services.translation.services.postprocess import reconstruct_garbled_page_payloads
 
 
@@ -84,6 +89,7 @@ def run_continuation_review(
         model=model,
         base_url=base_url,
         workers=workers,
+        request_chat_content_fn=request_chat_content,
         progress_callback=lambda current, total: emit_stage_progress(
             stage="continuation_review",
             message=f"正在判断跨栏/跨页连续段，第 {current}/{total} 批",
@@ -142,6 +148,7 @@ def run_page_policy_stage(
         sci_cutoff_page_idx=sci_cutoff_page_idx,
         sci_cutoff_block_idx=sci_cutoff_block_idx,
         policy_config=policy_config,
+        request_chat_content_fn=request_chat_content,
         progress_callback=lambda current, total, page_idx, page_classified: emit_stage_progress(
             stage="page_policies",
             message=f"正在执行页面策略，第 {current}/{total} 页",
@@ -274,6 +281,11 @@ def run_garbled_reconstruction_stage(
         model=model,
         base_url=base_url,
         workers=workers,
+        runtime=_garbled_reconstruction_runtime(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+        ),
         progress_callback=lambda current, total, dirty_pages: emit_stage_progress(
             stage="garbled_repair",
             message=f"正在修复乱码候选段，第 {current}/{total} 项",
@@ -309,6 +321,49 @@ def run_garbled_reconstruction_stage(
         f"book: garbled reconstruction candidates={garbled_candidates} reconstructed={reconstructed_items} "
         f"in {time.perf_counter() - reconstruct_started:.2f}s",
         flush=True,
+    )
+
+
+def _is_deepseek_provider(*, model: str, base_url: str) -> bool:
+    normalized_base = normalize_base_url(base_url).lower()
+    model_text = (model or "").strip().lower()
+    return "deepseek" in model_text or "deepseek.com" in normalized_base
+
+
+def _garbled_reconstruction_runtime(
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+) -> GarbledReconstructionRuntime:
+    if _is_deepseek_provider(model=model, base_url=base_url):
+        return GarbledReconstructionRuntime(
+            api_key=api_key or get_api_key(required=False),
+            model=model,
+            base_url=base_url,
+            provider_reason="job_provider",
+            request_chat_content_fn=request_chat_content,
+            normalize_base_url_fn=normalize_base_url,
+        )
+
+    deepseek_key = get_api_key(required=False)
+    if deepseek_key:
+        return GarbledReconstructionRuntime(
+            api_key=deepseek_key,
+            model=DEFAULT_MODEL,
+            base_url=DEFAULT_BASE_URL,
+            provider_reason="prefer_deepseek_api",
+            request_chat_content_fn=request_chat_content,
+            normalize_base_url_fn=normalize_base_url,
+        )
+
+    return GarbledReconstructionRuntime(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        provider_reason="job_provider_fallback",
+        request_chat_content_fn=request_chat_content,
+        normalize_base_url_fn=normalize_base_url,
     )
 
 

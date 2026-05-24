@@ -6,6 +6,8 @@ pub struct JobEventRecord {
     pub job_id: String,
     pub seq: i64,
     pub ts: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub created_at: String,
     pub level: String,
     #[serde(default)]
     pub user_stage: Option<String>,

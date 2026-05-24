@@ -7,7 +7,6 @@ sys.path.insert(0, str(REPO_SCRIPTS_ROOT))
 
 from services.rendering.layout.inline_content.core.markdown import build_markdown_from_direct_text
 from services.rendering.layout.inline_content.core.markdown import build_direct_typst_passthrough_text
-from services.rendering.layout.inline_content.core.markdown import promote_inline_math_like_text
 from services.rendering.layout.inline_content.fallback.placeholder_markdown import build_markdown_from_parts
 from services.rendering.layout.inline_content.fallback.placeholder_markdown import formula_map_lookup
 from services.rendering.layout.inline_content.fallback.placeholder_markdown import split_protected_text
@@ -125,8 +124,7 @@ def test_typst_markdown_supports_typed_formula_placeholders() -> None:
 
 def test_typst_markdown_supports_direct_math_text_without_formula_map() -> None:
     markdown = build_markdown_from_direct_text(r"转移矩阵Q_t表明，且x_t∈{0,1}^K。")
-    assert "$Q_t$" in markdown
-    assert "$x_t$" in markdown
+    assert markdown == r"转移矩阵Q_t表明，且x_t∈{0,1}^K。"
 
 
 def test_render_markdown_defaults_to_placeholder_mode() -> None:
@@ -140,18 +138,16 @@ def test_render_markdown_uses_direct_typst_path_for_item() -> None:
     assert markdown == r"积分 $\int f(x) dx$ 值"
 
 
-def test_direct_typst_render_markdown_normalizes_latex_cite_commands() -> None:
+def test_direct_typst_render_markdown_does_not_rewrite_latex_cite_commands() -> None:
     item = {"math_mode": "direct_typst"}
     markdown = build_item_render_markdown(
         item,
         r"ACONF\cite{124}、PCONF21\cite{117,126,127} 和 GMTKN55 \citep{117}",
         [],
     )
-    assert r"\cite" not in markdown
-    assert r"\citep" not in markdown
-    assert "ACONF¹²⁴" in markdown
-    assert "PCONF21¹¹⁷,¹²⁶,¹²⁷" in markdown
-    assert "GMTKN55 ¹¹⁷" in markdown
+    assert r"ACONF\cite{124}" in markdown
+    assert r"PCONF21\cite{117,126,127}" in markdown
+    assert r"GMTKN55 \citep{117}" in markdown
 
 
 def test_render_markdown_uses_formula_map_for_placeholder_mode() -> None:
@@ -167,10 +163,7 @@ def test_placeholder_boundary_helpers_preserve_token_splitting_and_lookup() -> N
 
 
 def test_typst_markdown_direct_typst_conservative_mode_does_not_guess_plain_scripts() -> None:
-    markdown = build_markdown_from_direct_text(
-        r"转移矩阵Q_t表明，且x_t∈{0,1}^K。",
-        aggressive_math_promotion=False,
-    )
+    markdown = build_markdown_from_direct_text(r"转移矩阵Q_t表明，且x_t∈{0,1}^K。")
     assert "$Q_t$" not in markdown
     assert "$x_t$" not in markdown
     assert "Q_t" in markdown
@@ -178,30 +171,25 @@ def test_typst_markdown_direct_typst_conservative_mode_does_not_guess_plain_scri
 
 
 def test_typst_markdown_direct_typst_conservative_mode_keeps_raw_latex_text() -> None:
-    markdown = build_markdown_from_direct_text(
-        r"离子为 \left[ NTf _ { 2 } \right] ，并形成 \mathrm { Co(IV) } 物种。",
-        aggressive_math_promotion=False,
-    )
+    markdown = build_markdown_from_direct_text(r"离子为 \left[ NTf _ { 2 } \right] ，并形成 \mathrm { Co(IV) } 物种。")
     assert r"$\left[" not in markdown
     assert r"$\mathrm" not in markdown
     assert r"\left[ NTf _ { 2 } \right]" in markdown
     assert "Co(IV)" in markdown
 
 
-def test_typst_markdown_direct_text_normalizes_latex_cite_before_math_promotion() -> None:
+def test_typst_markdown_direct_text_does_not_rewrite_latex_cite() -> None:
     markdown = build_markdown_from_direct_text(
         r"集合 ACONF\cite{124} 和 PCONF21\cite{117,126,127}。",
     )
-    assert r"\cite" not in markdown
-    assert "$\\cite" not in markdown
-    assert "ACONF¹²⁴" in markdown
-    assert "PCONF21¹¹⁷,¹²⁶,¹²⁷" in markdown
+    assert r"ACONF\cite{124}" in markdown
+    assert r"PCONF21\cite{117,126,127}" in markdown
+    assert "¹²⁴" not in markdown
 
 
 def test_typst_markdown_direct_typst_keeps_existing_inline_math_latex() -> None:
     markdown = build_markdown_from_direct_text(
         r"观察到 $\mathrm{Ph(i-PrO)SiH_2}$ (6) 的消耗速率快于其他硅烷。",
-        aggressive_math_promotion=False,
         normalize_existing_inline_math=True,
     )
     assert r"$\mathrm{Ph(i-PrO)SiH_2}$" in markdown
@@ -210,7 +198,6 @@ def test_typst_markdown_direct_typst_keeps_existing_inline_math_latex() -> None:
 def test_typst_markdown_direct_typst_keeps_existing_left_right_inline_math_latex() -> None:
     markdown = build_markdown_from_direct_text(
         r"形成了 $\left(\mathrm{Ph}\left(i-\mathrm{PrO}\right)_2\mathrm{Si}\right)_2\mathrm{O}$ 物种。",
-        aggressive_math_promotion=False,
         normalize_existing_inline_math=True,
     )
     assert r"\left" in markdown
@@ -218,11 +205,29 @@ def test_typst_markdown_direct_typst_keeps_existing_left_right_inline_math_latex
     assert "$" in markdown
 
 
-def test_typst_markdown_escapes_literal_double_asterisk_in_plain_text() -> None:
-    markdown = build_markdown_from_direct_text(
-        r"使用 6-310** 基组及其对应优化几何结构计算。",
-        aggressive_math_promotion=False,
+def test_direct_typst_passthrough_keeps_short_latex_text_subscripts_atomic() -> None:
+    markdown = build_direct_typst_passthrough_text(
+        r"外势集合 ($v_{\text{ext}}, \mathbf{B}_{\text{ext}}$) 之间的映射。"
     )
+
+    assert r"v_{\text{ext}}, \mathbf{B}_{\text{ext}}" in markdown
+    assert r"$v_{$" not in markdown
+    assert r"\mathbf{B}_{$" not in markdown
+
+
+def test_direct_typst_passthrough_keeps_adjacent_short_latex_text_subscripts_atomic() -> None:
+    markdown = build_direct_typst_passthrough_text(
+        r"势场组分别为$v_{\text{ext}}, A_{\text{ext}}$和$v_{\text{ext}}^{\prime}, A_{\text{ext}}^{\prime}$。"
+    )
+
+    assert r"$v_{\text{ext}}, A_{\text{ext}}$" in markdown
+    assert r"$v_{\text{ext}}^{\prime}, A_{\text{ext}}^{\prime}$" in markdown
+    assert r"$v_{$" not in markdown
+    assert r"A_{$" not in markdown
+
+
+def test_typst_markdown_escapes_literal_double_asterisk_in_plain_text() -> None:
+    markdown = build_markdown_from_direct_text(r"使用 6-310** 基组及其对应优化几何结构计算。")
     assert r"6-310\*\*" in markdown
 
 
@@ -333,45 +338,47 @@ def test_direct_typst_boundary_module_matches_legacy_passthrough_behavior() -> N
     assert build_direct_typst_passthrough_markdown(text) == build_direct_typst_passthrough_text(text)
 
 
-def test_typst_markdown_renders_superscript_citation_as_text() -> None:
+def test_typst_markdown_does_not_render_superscript_citation_as_unicode_text() -> None:
     formula_map = [{"placeholder": "<f1-17a/>", "formula_text": r"^{6c}"}]
     markdown = build_markdown_from_parts("方法<f1-17a/>促使", formula_map)
-    assert markdown == "方法⁶ᶜ促使"
+    assert "⁶ᶜ" not in markdown
+    assert "6c" in markdown
 
 
-def test_typst_markdown_compacts_bracket_citation_text() -> None:
+def test_typst_markdown_does_not_compact_bracket_citation_text() -> None:
     formula_map = [{"placeholder": "<f1-17a/>", "formula_text": r"[35, 36]"}]
     markdown = build_markdown_from_parts("见<f1-17a/>下一步", formula_map)
-    assert markdown == "见[35,36]下一步"
+    assert "[35" in markdown
+    assert "36]" in markdown
 
 
-def test_typst_markdown_promotes_bare_superscript_citation() -> None:
+def test_typst_markdown_does_not_promote_bare_superscript_citation_by_default() -> None:
     markdown = build_markdown_from_parts("Herzon课题组也使用了该条件。^{18}", [])
-    assert markdown.endswith("$^{18}$")
+    assert markdown.endswith("。^{18}")
 
 
-def test_typst_markdown_promotes_bare_scripted_chemical_formula() -> None:
-    markdown = build_markdown_from_parts("Co(III)(Sal^{tBu,tBu})(i - Pr) (4) 与中间体反应。", [])
-    expected = normalize_formula_for_latex_math("Co(III)(Sal^{tBu,tBu})(i - Pr)")
-    assert f"${expected}$" in markdown
-    assert "(4) 与中间体反应。" in markdown
+def test_typst_markdown_does_not_promote_bare_scripted_chemical_formula() -> None:
+    text = "Co(III)(Sal^{tBu,tBu})(i - Pr) (4) 与中间体反应。"
+    markdown = build_markdown_from_direct_text(text)
+    assert markdown == text
 
 
-def test_typst_markdown_repairs_double_slash_latex_command_outside_math() -> None:
-    markdown = build_markdown_from_parts(r"$\mathrm{Ni(II)}$-芳基/ \\mathrm{Co(IV)} -烷基", [])
+def test_typst_markdown_does_not_promote_double_slash_latex_command_outside_math() -> None:
+    markdown = build_markdown_from_direct_text(r"$\mathrm{Ni(II)}$-芳基/ \\mathrm{Co(IV)} -烷基")
     assert r"$\mathrm{Ni(II)}$" in markdown
-    assert r"$\mathrm{Co(IV)}$" in markdown
+    assert r"\\mathrm{Co(IV)}" in markdown
+    assert r"$\mathrm{Co(IV)}$" not in markdown
 
 
-def test_typst_markdown_promotes_left_right_bracket_formula() -> None:
-    markdown = build_markdown_from_parts(r"离子为 \left[ NTf _ { 2 } \right] 和配体。", [])
-    assert r"$\left[ NTf" in markdown
-    assert r"\right]$" in markdown
+def test_typst_markdown_does_not_promote_left_right_bracket_formula() -> None:
+    markdown = build_markdown_from_direct_text(r"离子为 \left[ NTf _ { 2 } \right] 和配体。")
+    assert r"$\left[ NTf" not in markdown
+    assert r"\left[ NTf _ { 2 } \right]" in markdown
 
 
-def test_typst_markdown_promotes_bracketed_ion_pair() -> None:
-    markdown = build_markdown_from_parts(r"溶剂使用 [BMM][PF6] 体系。", [])
-    assert r"$[BMM][PF6]$" in markdown
+def test_typst_markdown_does_not_promote_bracketed_ion_pair() -> None:
+    markdown = build_markdown_from_direct_text(r"溶剂使用 [BMM][PF6] 体系。")
+    assert markdown == r"溶剂使用 [BMM][PF6] 体系。"
 
 
 def test_formula_normalizer_repairs_low_risk_ocr_noise() -> None:
@@ -524,18 +531,6 @@ def test_typst_formula_compilation_handles_prime_and_mathcal_scripts() -> None:
         path, size = compile_formula_png(formula)
         assert path.exists()
         assert size[0] > 0 and size[1] > 0
-
-
-def test_promote_inline_math_like_text_for_garbled_reconstruction_blocks() -> None:
-    text = (
-        "转移矩阵Q_t表明，以概率1-β_t，x_t保持不变；"
-        "每个条目[Q_t]_ij表示从状态i到j的转移概率，且x_t∈{0,1}^K。"
-    )
-    markdown = promote_inline_math_like_text(text)
-    assert "$Q_t$" in markdown
-    assert "$1-β_t$" in markdown
-    assert "$x_t$" in markdown
-    assert "$[Q_t]_{ij}$" in markdown
 
 
 def test_export_translation_template_direct_typst_keeps_raw_source_text() -> None:

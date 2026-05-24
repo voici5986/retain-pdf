@@ -46,6 +46,19 @@ def test_single_item_extractor_unwraps_nested_batch_json_shell() -> None:
     )
 
 
+def test_single_item_extractor_rejects_broken_protocol_shell() -> None:
+    broken = '{"translations":[{"item_id":"p001-b019","translated_text":"未闭合协议外壳"'
+
+    with pytest.raises(Exception):
+        deepseek_client.extract_single_item_translation_text(broken, "p001-b019")
+
+
+def test_single_item_extractor_allows_plain_text_with_references() -> None:
+    text = "该结论可由 Lehmann 表示推出 [94, 95]。"
+
+    assert deepseek_client.extract_single_item_translation_text(text, "p001-b019") == text
+
+
 def test_english_residue_detector_only_blocks_copy_dominant_english_output() -> None:
     item = {
         "item_id": "p002-b001",

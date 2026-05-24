@@ -52,6 +52,9 @@ pub fn build_job_detail_view(
         .as_ref()
         .and_then(|snapshot| snapshot.progress_total)
         .or(job.progress_total);
+    let progress_unit = live_stage
+        .as_ref()
+        .and_then(|snapshot| snapshot.progress_unit.clone());
     let percent = match (progress_current, progress_total) {
         (Some(current), Some(total)) if total > 0 => Some((current as f64 / total as f64) * 100.0),
         _ => None,
@@ -93,6 +96,7 @@ pub fn build_job_detail_view(
             current: progress_current,
             total: progress_total,
             percent,
+            unit: progress_unit,
         },
         timestamps: JobTimestampsView {
             created_at: job.created_at.clone(),

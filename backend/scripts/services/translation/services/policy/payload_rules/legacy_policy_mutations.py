@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Callable
 
 from services.translation.core.item_reader import item_is_reference_like
 from services.translation.core.item_reader import item_normalized_sub_type
@@ -113,6 +114,7 @@ def apply_mixed_literal_split_policy(
     base_url: str,
     workers: int,
     rule_guidance: str = "",
+    request_chat_content_fn: Callable[..., str] | None = None,
 ) -> dict[str, int]:
     candidates = [
         item
@@ -134,6 +136,7 @@ def apply_mixed_literal_split_policy(
         base_url=base_url,
         workers=workers,
         rule_guidance=rule_guidance,
+        request_chat_content_fn=request_chat_content_fn,
     )
     keep_all = 0
     translate_all = 0

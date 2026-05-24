@@ -49,6 +49,10 @@ def preserved_line_boxes_for_item(item: dict, translated_text: str) -> list[Rend
 
 
 def looks_like_structured_line_block(item: dict, lines: list[str] | None = None) -> bool:
+    semantic_role = str(item.get("semantic_role") or item.get("layout_role") or "").strip().lower()
+    structure_role = str(item.get("structure_role") or "").strip().lower()
+    if structure_role != "table_of_contents" and semantic_role in {"body", "abstract"}:
+        return False
     if str(item.get("text_flow", "") or "").strip().lower() == TEXT_FLOW_PRESERVE_LINES:
         return True
     source_text = str(item.get("protected_source_text") or item.get("source_text") or "")
@@ -119,7 +123,8 @@ def maybe_preserve_structured_line_breaks(item: dict, translated_text: str) -> s
         if looks_like_structured_line_block(item):
             item["_render_preserve_line_breaks"] = True
             item["_render_line_structure"] = "structured_lines"
-        return text
+            return text
+        return re.sub(r"[ \t]*[\r\n]+[ \t]*", " ", text).strip()
     lines = source_line_texts(item)
     if not looks_like_structured_line_block(item, lines):
         return text

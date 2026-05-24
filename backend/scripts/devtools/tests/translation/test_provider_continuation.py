@@ -318,6 +318,36 @@ def test_provider_cross_page_hint_without_boundary_roles_falls_back_to_rules() -
     assert payload[0]["continuation_group"] != "provider-paddle-global-abc"
 
 
+def test_rule_cross_page_pair_can_land_on_next_page_middle_when_text_continues() -> None:
+    state = _load_state_module()
+    payload = [
+        _payload_item(
+            item_id="a",
+            page_idx=0,
+            text="The paragraph continues with",
+            bbox=[320, 700, 560, 760],
+            layout_mode="double",
+            layout_zone="right_column",
+            layout_boundary_role="tail",
+        ),
+        _payload_item(
+            item_id="b",
+            page_idx=1,
+            text="term. In fact, this is a later paragraph on the next page.",
+            bbox=[60, 260, 300, 320],
+            layout_mode="double",
+            layout_zone="left_column",
+            layout_boundary_role="middle",
+        ),
+    ]
+
+    state.annotate_continuation_context(payload)
+
+    assert payload[0]["continuation_decision"] == "joined"
+    assert payload[1]["continuation_decision"] == "joined"
+    assert payload[0]["continuation_group"] == payload[1]["continuation_group"]
+
+
 def test_provider_cross_page_hint_skipping_pages_is_not_consumed() -> None:
     state = _load_state_module()
     payload = [

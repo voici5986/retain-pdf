@@ -9,6 +9,15 @@ class RenderLineBox:
 
 
 @dataclass
+class RenderTocEntry:
+    title: str
+    page_label: str
+    bbox: list[float]
+    number: str = ""
+    level: int = 1
+
+
+@dataclass
 class RenderBlock:
     block_id: str
     bbox: list[float]
@@ -39,6 +48,7 @@ class RenderBlock:
     source_item_id: str = ""
     preserve_line_breaks: bool = False
     preserved_line_boxes: list[RenderLineBox] | None = None
+    toc_entries: list[RenderTocEntry] | None = None
 
 
 @dataclass
@@ -65,10 +75,13 @@ class RenderLayoutBlock:
     fit_shift_up_pt: float = 0.0
     first_line_indent_pt: float = 0.0
     justify_text: bool = False
+    text_color: tuple[float, float, float] = (0, 0, 0)
+    cover_fill: tuple[float, float, float] = (1, 1, 1)
     use_cover_fill: bool = False
     skip_reason: str = ""
     preserve_line_breaks: bool = False
     preserved_line_boxes: list[RenderLineBox] | None = None
+    toc_entries: list[RenderTocEntry] | None = None
 
 
 @dataclass

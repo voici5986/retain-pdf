@@ -34,7 +34,7 @@ def build_typst_source_from_page_specs(
         )
         for block_index, block in enumerate(spec.blocks):
             block_id = f"rp{page_offset}_{block.block_id}_{block_index}"
-            lines.append(build_typst_block(block_id, layout_block_to_render_block(block), include_fill=False))
+            lines.append(build_typst_block(block_id, layout_block_to_render_block(block), include_fill=True))
         if page_offset + 1 < len(page_specs):
             lines.append("#pagebreak()")
         emit_render_page_progress(

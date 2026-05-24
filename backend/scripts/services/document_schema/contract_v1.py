@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from services.document_schema.text_flow import classify_text_flow
+from services.document_schema.text_flow import classify_text_flow_for_role
 from services.document_schema.text_flow import line_texts_from_lines
+from services.document_schema.text_flow import TEXT_FLOW_PRESERVE_LINES
+from services.document_schema.toc import build_toc_entries
 
 
 _TEXT_LAYOUT_SUBTYPE_MAP = {
@@ -155,7 +157,17 @@ def _build_content(block: dict, *, page_index: int, order: int) -> dict:
     line_texts = explicit_line_texts if len(explicit_line_texts) >= 2 else line_texts_from_lines(block.get("lines", []))
     if line_texts:
         content["line_texts"] = line_texts
-        content["text_flow"] = classify_text_flow(text=text, lines=block.get("lines", []))
+        content["text_flow"] = classify_text_flow_for_role(
+            text=text,
+            lines=block.get("lines", []),
+            semantic_role=str(block.get("semantic_role", "") or ""),
+            structure_role=str(block.get("structure_role", "") or ""),
+        )
+    if str(block.get("structure_role", "") or "").strip().lower() == "table_of_contents":
+        toc_entries = build_toc_entries(lines=block.get("lines", []), line_texts=line_texts)
+        if toc_entries:
+            content["toc_entries"] = toc_entries
+            content["text_flow"] = TEXT_FLOW_PRESERVE_LINES
 
     metadata = block.get("metadata", {}) or {}
     asset_key = str(metadata.get("asset_key", "") or "").strip()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from services.translation.services.context import TranslationDocumentContext
 from services.translation.services.context import build_page_item_contexts
@@ -33,6 +34,7 @@ class TranslationPlanner:
         base_url: str,
         batch_size: int,
         request_label: str = "",
+        request_chat_content_fn: Callable[..., str] | None = None,
     ) -> dict[str, str]:
         classify_item_contexts = _load_classifier()
         item_contexts = build_page_item_contexts(payload)
@@ -44,6 +46,7 @@ class TranslationPlanner:
             batch_size=batch_size,
             rule_guidance=self.document_context.rule_guidance,
             request_label=request_label,
+            request_chat_content_fn=request_chat_content_fn,
         )
 
 

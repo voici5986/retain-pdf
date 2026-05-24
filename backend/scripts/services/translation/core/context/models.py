@@ -33,6 +33,14 @@ def _count_inline_formulas(segments: list[dict]) -> int:
     return sum(1 for segment in segments if segment.get("type") == "inline_equation")
 
 
+def _is_structured_line_context(*, text_flow: str, semantic_role: str, structure_role: str, toc_entries: list[dict[str, Any]]) -> bool:
+    if str(structure_role or "").strip().lower() == "table_of_contents" or toc_entries:
+        return True
+    if str(semantic_role or "").strip().lower() in {"body", "abstract"}:
+        return False
+    return str(text_flow or "").strip().lower() == "preserve_lines"
+
+
 @dataclass(frozen=True)
 class TranslationDocumentContext:
     mode: str = "fast"
@@ -66,10 +74,20 @@ class TranslationItemContext:
     context_before: str = ""
     context_after: str = ""
     metadata: dict[str, Any] | None = None
+    toc_entries: list[dict[str, Any]] | None = None
     raw_item: dict[str, Any] | None = None
 
+    @property
+    def preserve_line_structure_for_prompt(self) -> bool:
+        return _is_structured_line_context(
+            text_flow=self.text_flow,
+            semantic_role=self.semantic_role,
+            structure_role=str((self.metadata or {}).get("structure_role", "") or ""),
+            toc_entries=list(self.toc_entries or []),
+        )
+
     def source_for_prompt(self) -> str:
-        if self.text_flow == "preserve_lines" and self.line_texts:
+        if self.preserve_line_structure_for_prompt and self.line_texts:
             return "\n".join(line for line in self.line_texts if line.strip())
         return self.protected_source_text
 
@@ -89,10 +107,13 @@ class TranslationItemContext:
         }
         if self.style_hint:
             payload["style_hint"] = self.style_hint
-        if self.text_flow == "preserve_lines" and self.line_texts:
+        if self.preserve_line_structure_for_prompt and self.line_texts:
             payload["text_flow"] = "preserve_lines"
             payload["line_count"] = len(self.line_texts)
             payload["instruction"] = "保持原文多行结构，译文尽量使用相同换行数量和行序。"
+        if self.toc_entries:
+            payload["structure"] = "table_of_contents"
+            payload["instruction"] = "这是目录页内容。逐行翻译标题，保留章节编号、点线省略号和页码的位置关系，不要合并行。"
         if self.continuation_group:
             payload["continuation_group"] = self.continuation_group
         context_before = self.context_before_for_prompt()
@@ -120,6 +141,8 @@ class TranslationItemContext:
             "has_inline_formula": self.has_inline_formula,
             "metadata": dict(self.metadata or {}),
         }
+        if self.toc_entries:
+            record["toc_entries"] = list(self.toc_entries)
         if rule_label:
             record["rule_label"] = rule_label
         return record
@@ -177,6 +200,7 @@ def build_item_context(item: dict[str, Any], *, order: int = 0, page_idx: int | 
         lines=lines,
         line_texts=explicit_line_texts or _line_texts(lines),
         text_flow=str(item.get("text_flow", "") or "flow").strip().lower() or "flow",
+        toc_entries=list(item.get("toc_entries", []) or []),
         has_inline_formula=bool(formula_map) or _count_inline_formulas(segments) > 0,
         math_mode=str(item.get("math_mode", "placeholder") or "placeholder").strip() or "placeholder",
         style_hint=structure_style_hint(item),

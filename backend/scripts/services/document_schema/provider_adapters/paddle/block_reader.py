@@ -11,8 +11,10 @@ from services.document_schema.provider_adapters.paddle.context import PaddleBloc
 from services.document_schema.provider_adapters.paddle.context import PaddlePageContext
 from services.document_schema.provider_adapters.paddle.page_trace import attach_layout_trace
 from services.document_schema.provider_adapters.paddle.rich_content import enrich_rich_content_trace
-from services.document_schema.text_flow import classify_text_flow
+from services.document_schema.text_flow import classify_text_flow_for_role
 from services.document_schema.text_flow import line_texts_from_lines
+from services.document_schema.text_flow import TEXT_FLOW_PRESERVE_LINES
+from services.document_schema.toc import build_toc_entries
 from services.document_schema.provider_adapters.paddle.trace import build_derived
 from services.document_schema.provider_adapters.paddle.trace import build_metadata
 from services.document_schema.provider_adapters.paddle.trace import build_source
@@ -46,6 +48,13 @@ _TEXT_ROLE_BY_SUBTYPE = {
         structure_role="body",
         translate=True,
         translate_reason="provider_body_whitelist:body",
+    ),
+    "table_of_contents": PaddleTextRoleRule(
+        layout_role="toc",
+        semantic_role="table_of_contents",
+        structure_role="table_of_contents",
+        translate=True,
+        translate_reason="provider_toc_whitelist:content",
     ),
     "header": PaddleTextRoleRule(layout_role="header", semantic_role="metadata"),
     "footer": PaddleTextRoleRule(layout_role="footer", semantic_role="metadata"),
@@ -236,7 +245,6 @@ def build_block_spec(
     )
     explicit_line_texts = [line.strip() for line in block_context["text"].splitlines() if line.strip()]
     line_texts = explicit_line_texts if len(explicit_line_texts) >= 2 else line_texts_from_lines(lines)
-    text_flow = classify_text_flow(text=block_context["text"], lines=lines)
     metadata = build_block_metadata(
         block_context=block_context,
         kind_metadata=kind_metadata,
@@ -257,10 +265,19 @@ def build_block_spec(
     layout_role = role_rule.layout_role
     semantic_role = role_rule.semantic_role
     structure_role = role_rule.structure_role
+    text_flow = classify_text_flow_for_role(
+        text=block_context["text"],
+        lines=lines,
+        semantic_role=semantic_role,
+        structure_role=structure_role,
+    )
     policy = {
         "translate": role_rule.translate,
         "translate_reason": role_rule.translate_reason,
     }
+    toc_entries = build_toc_entries(lines=lines, line_texts=line_texts) if sub_type == "table_of_contents" else []
+    if toc_entries:
+        text_flow = TEXT_FLOW_PRESERVE_LINES
     metadata["structure_role"] = structure_role
     metadata["layout_role"] = layout_role
     metadata["semantic_role"] = semantic_role
@@ -278,6 +295,7 @@ def build_block_spec(
             "kind": block_type,
             "text": block_context["text"],
             **({"line_texts": line_texts, "text_flow": text_flow} if line_texts else {}),
+            **({"toc_entries": toc_entries} if toc_entries else {}),
         },
         "text": block_context["text"],
         "lines": lines,

@@ -9,6 +9,7 @@ MIN_SINGLE_COLUMN_MAIN_ITEMS = 3
 MIN_DOUBLE_COLUMN_MAIN_ITEMS = 3
 MIN_TWO_COLUMN_GAP_RATIO = 0.18
 FULL_WIDTH_RATIO = 0.78
+PROVIDER_COLUMN_GUESSES = {"left", "right", "full"}
 
 
 def bbox_width(item: dict) -> float:
@@ -76,10 +77,57 @@ def _flow_candidate(item: dict) -> bool:
 
 def detect_page_layout(items: list[dict]) -> tuple[str, float, float]:
     flow_items = [item for item in items if _flow_candidate(item)]
+    provider_layout = _detect_provider_page_layout(flow_items)
+    if provider_layout is not None:
+        layout_mode, split_x = provider_layout
+        flow_widths = [bbox_width(item) for item in flow_items if _provider_column_guess(item) != "full"]
+        median_flow_width = median(flow_widths) if flow_widths else 0.0
+        return layout_mode, split_x, median_flow_width
     layout_mode, split_x = detect_columns_from_main_items(flow_items)
     flow_widths = [bbox_width(item) for item in flow_items]
     median_flow_width = median(flow_widths) if flow_widths else 0.0
     return layout_mode, split_x, median_flow_width
+
+
+def _provider_column_layout_mode(item: dict) -> str:
+    return str(
+        item.get("provider_column_layout_mode")
+        or (item.get("metadata") or {}).get("column_layout_mode")
+        or (item.get("metadata") or {}).get("provider_column_layout_mode")
+        or ""
+    ).strip().lower()
+
+
+def _provider_column_guess(item: dict) -> str:
+    value = str(
+        item.get("provider_column_index_guess")
+        or (item.get("metadata") or {}).get("column_index_guess")
+        or (item.get("metadata") or {}).get("provider_column_index_guess")
+        or ""
+    ).strip().lower()
+    return value if value in PROVIDER_COLUMN_GUESSES else ""
+
+
+def _detect_provider_page_layout(flow_items: list[dict]) -> tuple[str, float] | None:
+    provider_double_items = [
+        item
+        for item in flow_items
+        if _provider_column_layout_mode(item) == "double"
+    ]
+    if len(provider_double_items) < MIN_SINGLE_COLUMN_MAIN_ITEMS:
+        return None
+    left_items = [item for item in provider_double_items if _provider_column_guess(item) == "left"]
+    right_items = [item for item in provider_double_items if _provider_column_guess(item) == "right"]
+    if len(left_items) < 2 or len(right_items) < 2:
+        return None
+    left_centers = [bbox_center_x(item) for item in left_items]
+    right_centers = [bbox_center_x(item) for item in right_items]
+    if not left_centers or not right_centers:
+        return None
+    split_x = (max(left_centers) + min(right_centers)) / 2
+    if split_x <= 0:
+        return None
+    return "double", split_x
 
 
 def annotate_payload_layout_zones(payload: list[dict]) -> tuple[str, float]:
@@ -94,7 +142,12 @@ def annotate_payload_layout_zones(payload: list[dict]) -> tuple[str, float]:
         if _flow_candidate(item):
             item_width = bbox_width(item)
             if layout_mode == "double":
-                if full_width_threshold > 0 and item_width >= full_width_threshold:
+                provider_guess = _provider_column_guess(item)
+                if provider_guess == "full":
+                    zone = "full_width"
+                elif provider_guess in {"left", "right"}:
+                    zone = f"{provider_guess}_column"
+                elif full_width_threshold > 0 and item_width >= full_width_threshold:
                     zone = "full_width"
                 else:
                     zone = "left_column" if bbox_center_x(item) < split_x else "right_column"

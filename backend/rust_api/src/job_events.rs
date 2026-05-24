@@ -152,6 +152,7 @@ fn append_pending_event(
         user_stage: pending
             .user_stage
             .clone()
+            .map(normalize_user_stage)
             .or_else(|| user_stage_for_event(event.stage.as_deref())),
         substage: pending
             .substage
@@ -480,12 +481,20 @@ fn user_stage_for_event(stage: Option<&str>) -> Option<String> {
         | "continuation_review"
         | "page_policies"
         | "domain_inference"
-        | "garbled_repair" => Some("translate".to_string()),
+        | "garbled_repair" => Some("translation".to_string()),
         "render_prepare" | "rendering" | "compile" | "overlay" | "saving" => {
             Some("render".to_string())
         }
         "finished" | "done" => Some("done".to_string()),
         _ => None,
+    }
+}
+
+fn normalize_user_stage(value: String) -> String {
+    if value.trim() == "translate" {
+        "translation".to_string()
+    } else {
+        value
     }
 }
 
@@ -574,7 +583,7 @@ mod tests {
         assert_eq!(transition.stage_detail.as_deref(), Some("正在翻译"));
         assert_eq!(transition.provider.as_deref(), Some("paddle"));
         assert_eq!(transition.event, "stage_transition");
-        assert_eq!(transition.user_stage.as_deref(), Some("translate"));
+        assert_eq!(transition.user_stage.as_deref(), Some("translation"));
         assert_eq!(transition.progress_unit.as_deref(), Some("batch"));
     }
 

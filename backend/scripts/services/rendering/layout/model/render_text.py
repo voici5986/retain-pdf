@@ -56,6 +56,10 @@ def _should_use_unit_translation(item: dict) -> bool:
     return unit_kind == "group" or bool(item.get("continuation_group") or item.get("continuation_group_id"))
 
 
+def _member_translation_text(item: dict) -> str:
+    return str(item.get("protected_translated_text") or item.get("translated_text") or "").strip()
+
+
 def restore_render_protected_text(text: str, item: dict) -> str:
     current = str(text or "").strip()
     if not current or not _has_protected_token(current):
@@ -83,6 +87,8 @@ def get_render_protected_text(item: dict) -> str:
             translated,
             item,
         )
+    if (item.get("continuation_group") or item.get("continuation_group_id")) and _member_translation_text(item):
+        return restore_render_protected_text(_member_translation_text(item), item)
     return restore_render_protected_text(
         str(
             item.get("translation_unit_protected_translated_text")

@@ -1,3 +1,5 @@
+const READER_FRAME_PLACEHOLDER = "<style>html,body{margin:0;min-height:100%;background:#f3f4f6;color:#1d1d1f}</style>";
+
 export function readerDialogElements(host) {
   return {
     dialog: host.querySelector("#reader-dialog"),
@@ -74,7 +76,14 @@ export function restoreReaderDialogButton(host, id, markup) {
 export function setReaderDialogFrameSource(host, url = "about:blank") {
   const { frame } = readerDialogElements(host);
   if (frame) {
-    frame.src = url;
+    const normalizedUrl = `${url || ""}`.trim();
+    if (!normalizedUrl || normalizedUrl === "about:blank") {
+      frame.removeAttribute("src");
+      frame.setAttribute("srcdoc", READER_FRAME_PLACEHOLDER);
+      return;
+    }
+    frame.removeAttribute("srcdoc");
+    frame.src = normalizedUrl;
   }
 }
 

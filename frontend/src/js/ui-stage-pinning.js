@@ -69,3 +69,31 @@ export function pinnedStagePresentation(stageKey = "") {
       };
   }
 }
+
+export function resolvePinnedStagePresentation({
+  state,
+  jobId = "",
+  presentation,
+}) {
+  const stagePresentation = { ...(presentation || {}) };
+  const displayStage = keepDisplayedStageForward({
+    state,
+    stageKey: stagePresentation.stageKey,
+    jobId,
+  });
+  stagePresentation.stageKey = displayStage.stageKey;
+  if (!displayStage.keptPrevious) {
+    return stagePresentation;
+  }
+  const pinned = pinnedStagePresentation(displayStage.stageKey);
+  return {
+    ...stagePresentation,
+    visualStageKey: displayStage.stageKey,
+    label: pinned.label,
+    detail: pinned.detail,
+    progressText: "",
+    progressCurrent: null,
+    progressTotal: null,
+    progressIndeterminate: false,
+  };
+}

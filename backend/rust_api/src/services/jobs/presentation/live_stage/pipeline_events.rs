@@ -79,10 +79,12 @@ pub(super) fn load_pipeline_events_jsonl(
             Some(JobEventRecord {
                 job_id: job_id.to_string(),
                 seq: base_seq + index as i64 + 1,
-                ts: parsed.ts.unwrap_or_default(),
+                ts: parsed.ts.clone().unwrap_or_default(),
+                created_at: parsed.ts.unwrap_or_default(),
                 level: parsed.level.unwrap_or_else(|| "info".to_string()),
                 user_stage: parsed
                     .user_stage
+                    .map(normalize_user_stage)
                     .or_else(|| user_stage_for_event(parsed.stage.as_deref())),
                 substage: parsed
                     .substage
@@ -119,12 +121,20 @@ fn user_stage_for_event(stage: Option<&str>) -> Option<String> {
         | "continuation_review"
         | "page_policies"
         | "domain_inference"
-        | "garbled_repair" => Some("translate".to_string()),
+        | "garbled_repair" => Some("translation".to_string()),
         "render_prepare" | "rendering" | "compile" | "overlay" | "saving" => {
             Some("render".to_string())
         }
         "finished" | "done" => Some("done".to_string()),
         _ => None,
+    }
+}
+
+fn normalize_user_stage(value: String) -> String {
+    if value.trim() == "translate" {
+        "translation".to_string()
+    } else {
+        value
     }
 }
 

@@ -17,12 +17,25 @@ from services.rendering.source.render_source import RenderSourcePdf
 from services.rendering.source.render_source import build_render_source_pdf
 from services.rendering.source.preparation.bbox_text_strip_candidates import build_bbox_text_strip_candidates
 from services.rendering.source.preparation.bbox_text_strip_types import BBoxTextStripCandidates
+from services.rendering.source.prewarm_color_profile import build_render_color_profile_manifest
+from services.rendering.source.prewarm_color_profile import render_colors_from_manifest
+from services.rendering.source.prewarm_manifest import bbox_list_from_value
+from services.rendering.source.prewarm_manifest import float_or_none
+from services.rendering.source.prewarm_manifest import float_or_zero
+from services.rendering.source.prewarm_manifest import int_list
+from services.rendering.source.prewarm_manifest import int_or_default
+from services.rendering.source.prewarm_manifest import rect_tuple_from_value
+from services.rendering.source.prewarm_manifest import relative_to_manifest
+from services.rendering.source.prewarm_manifest import resolve_manifest_path
+from services.rendering.source.prewarm_manifest import write_json_atomic
+from services.rendering.source.prewarm_page_specs import build_background_render_page_specs_manifest
+from services.rendering.source.prewarm_page_specs import render_page_specs_from_manifest
 from services.rendering.layout.payload.block_seed_metrics import collect_page_seed_metrics
 from services.rendering.layout.payload.first_line_indent import detect_first_line_indent_pt_with_displaylist
 from services.rendering.layout.payload.first_line_indent import is_first_line_indent_candidate
 from services.rendering.layout.payload.render_item import get_render_first_line_indent_pt
 from services.rendering.layout.payload.render_item import seed_render_fields
-from services.rendering.policy import apply_render_pages_policy_fields
+from services.rendering.layout.model.models import RenderPageSpec
 from services.translation.public import item_block_kind
 
 
@@ -34,6 +47,7 @@ HIDDEN_TEXT_STRIP_ALGORITHM_VERSION = "hidden_text_strip_v1"
 IMAGE_COMPRESSION_ALGORITHM_VERSION = "image_only_compress_v1"
 FIRST_LINE_INDENT_ALGORITHM_VERSION = "first_line_indent_v1"
 GEOMETRY_ADJUSTMENT_ALGORITHM_VERSION = "geometry_adjustments_v1"
+PAYLOAD_RENDER_ALGORITHM_VERSION = "payload_render_member_continuation_visual_profile_v5_color_tuple"
 
 
 @dataclass(frozen=True)
@@ -68,6 +82,8 @@ class RenderPayloadPrewarm:
     first_line_indent_lookup: dict[str, float]
     effective_inner_bbox_lookup: dict[str, list[float]]
     bbox_text_strip_candidates: BBoxTextStripCandidates | None = None
+    background_render_page_specs: list[RenderPageSpec] | None = None
+    render_colors_by_item_id: dict[str, dict[str, tuple[float, float, float]]] | None = None
 
 
 def prewarm_manifest_path_from_artifacts_dir(artifacts_dir: Path) -> Path:
@@ -101,10 +117,10 @@ def _payload_structure_item(page_idx: int, item: dict) -> dict[str, Any]:
     block_kind = item_block_kind(item)
     return {
         "item_id": str(item.get("item_id", "") or ""),
-        "page_idx": _int_or_default(item.get("page_idx"), page_idx),
+        "page_idx": int_or_default(item.get("page_idx"), page_idx),
         "block_type": str(item.get("block_type", "") or ""),
         "block_kind": block_kind,
-        "bbox": [_float_or_zero(value) for value in list(item.get("bbox", []) or [])[:4]],
+        "bbox": [float_or_zero(value) for value in list(item.get("bbox", []) or [])[:4]],
         "layout_role": str(item.get("layout_role", "") or ""),
         "semantic_role": str(item.get("semantic_role", "") or ""),
         "structure_role": str(item.get("structure_role", "") or ""),
@@ -128,7 +144,7 @@ def _is_bbox_text_strip_candidate(item: dict) -> bool:
     bbox = item.get("bbox", [])
     if len(bbox) != 4:
         return False
-    if all(_float_or_zero(value) == 0.0 for value in bbox):
+    if all(float_or_zero(value) == 0.0 for value in bbox):
         return False
     return _has_render_source_or_output_text(item)
 
@@ -162,6 +178,7 @@ def build_render_prewarm_fingerprint(
         "hidden_text_strip_algorithm": HIDDEN_TEXT_STRIP_ALGORITHM_VERSION,
         "image_compression_algorithm": IMAGE_COMPRESSION_ALGORITHM_VERSION,
         "geometry_adjustment_algorithm": GEOMETRY_ADJUSTMENT_ALGORITHM_VERSION,
+        "payload_render_algorithm": PAYLOAD_RENDER_ALGORITHM_VERSION,
     }
 
 
@@ -197,7 +214,7 @@ def try_load_prewarmed_render_source_pdf(
         return None
     try:
         render_source = dict(manifest.get("render_source") or {})
-        render_source_path = _resolve_manifest_path(Path(manifest_path), render_source.get("path"))
+        render_source_path = resolve_manifest_path(Path(manifest_path), render_source.get("path"))
         if render_source_path is None or not render_source_path.exists():
             print("render prewarm: source file missing; fallback to synchronous render source prep", flush=True)
             return None
@@ -206,9 +223,9 @@ def try_load_prewarmed_render_source_pdf(
             path=render_source_path,
             temp_paths=[],
             image_compressed=bool(render_source.get("image_compressed")),
-            bbox_text_stripped_page_indices=frozenset(_int_list(render_source.get("bbox_text_stripped_page_indices"))),
-            bbox_text_strip_skipped_page_indices=frozenset(_int_list(render_source.get("bbox_text_strip_skipped_page_indices"))),
-            source_text_precleaned_page_indices=frozenset(_int_list(render_source.get("source_text_precleaned_page_indices"))),
+            bbox_text_stripped_page_indices=frozenset(int_list(render_source.get("bbox_text_stripped_page_indices"))),
+            bbox_text_strip_skipped_page_indices=frozenset(int_list(render_source.get("bbox_text_strip_skipped_page_indices"))),
+            source_text_precleaned_page_indices=frozenset(int_list(render_source.get("source_text_precleaned_page_indices"))),
         )
     except Exception as exc:
         print(f"render prewarm: load failed {type(exc).__name__}: {exc}; fallback", flush=True)
@@ -242,30 +259,40 @@ def try_load_render_payload_prewarm(
     first_line_indent_lookup = {
         str(key): float(value)
         for key, value in dict(payload.get("first_line_indent_by_item_id") or {}).items()
-        if _float_or_none(value) is not None
+        if float_or_none(value) is not None
     }
     effective_inner_bbox_lookup = {
         str(key): bbox
         for key, value in dict(payload.get("effective_inner_bbox_by_item_id") or {}).items()
-        if (bbox := _bbox_list_from_value(value)) is not None
+        if (bbox := bbox_list_from_value(value)) is not None
     }
     bbox_candidates = _bbox_candidates_from_manifest(payload.get("bbox_text_strip_candidates"))
+    background_render_page_specs = render_page_specs_from_manifest(
+        payload.get("background_render_page_specs")
+    )
+    render_colors_by_item_id = render_colors_from_manifest(payload.get("render_color_profile"))
     if (
         not first_line_indent_lookup
         and not effective_inner_bbox_lookup
         and bbox_candidates is None
+        and background_render_page_specs is None
+        and not render_colors_by_item_id
     ):
         return None
     print(
         f"render payload prewarm: hit indents={len(first_line_indent_lookup)} "
         f"geometry={len(effective_inner_bbox_lookup)} "
-        f"bbox_pages={len(bbox_candidates.page_rects) if bbox_candidates is not None else 0}",
+        f"bbox_pages={len(bbox_candidates.page_rects) if bbox_candidates is not None else 0} "
+        f"background_specs={len(background_render_page_specs or [])} "
+        f"colors={len(render_colors_by_item_id)}",
         flush=True,
     )
     return RenderPayloadPrewarm(
         first_line_indent_lookup=first_line_indent_lookup,
         effective_inner_bbox_lookup=effective_inner_bbox_lookup,
         bbox_text_strip_candidates=bbox_candidates,
+        background_render_page_specs=background_render_page_specs,
+        render_colors_by_item_id=render_colors_by_item_id or None,
     )
 
 
@@ -350,7 +377,7 @@ def _run_render_source_prewarm(spec: RenderPrewarmSpec, manifest_path: Path) -> 
             elapsed=time.perf_counter() - started,
             payload_prewarm=payload_prewarm,
         )
-        _write_json_atomic(manifest_path, manifest)
+        write_json_atomic(manifest_path, manifest)
         print(f"render prewarm: ready elapsed={time.perf_counter() - started:.2f}s manifest={manifest_path}", flush=True)
         return manifest_path
     except Exception as exc:
@@ -370,7 +397,7 @@ def _build_manifest(
         "schema": RENDER_PREWARM_SCHEMA,
         "fingerprint": fingerprint,
         "render_source": {
-            "path": _relative_to_manifest(manifest_path, prepared.path),
+            "path": relative_to_manifest(manifest_path, prepared.path),
             "image_compressed": prepared.image_compressed,
             "bbox_text_stripped_page_indices": sorted(prepared.bbox_text_stripped_page_indices),
             "bbox_text_strip_skipped_page_indices": sorted(prepared.bbox_text_strip_skipped_page_indices),
@@ -441,8 +468,21 @@ def _build_payload_prewarm(
         "first_line_indent_algorithm": FIRST_LINE_INDENT_ALGORITHM_VERSION,
         "first_line_indent_by_item_id": first_line_indent_by_item_id,
         "geometry_adjustment_algorithm": GEOMETRY_ADJUSTMENT_ALGORITHM_VERSION,
+        "payload_render_algorithm": PAYLOAD_RENDER_ALGORITHM_VERSION,
         "effective_inner_bbox_by_item_id": effective_inner_bbox_by_item_id,
         "bbox_text_strip_candidates": bbox_payload,
+        "render_color_profile": build_render_color_profile_manifest(
+            source_pdf_path=source_pdf_path,
+            translated_pages=translated_pages,
+            first_line_indent_lookup=first_line_indent_by_item_id,
+            effective_inner_bbox_lookup=effective_inner_bbox_by_item_id,
+        ),
+        "background_render_page_specs": build_background_render_page_specs_manifest(
+            source_pdf_path=source_pdf_path,
+            translated_pages=translated_pages,
+            first_line_indent_lookup=first_line_indent_by_item_id,
+            effective_inner_bbox_lookup=effective_inner_bbox_by_item_id,
+        ),
     }
 
 
@@ -548,7 +588,7 @@ def _bbox_candidates_from_manifest(value: object) -> BBoxTextStripCandidates | N
             continue
         rects: list[tuple[float, float, float, float]] = []
         for raw_rect in raw_rects if isinstance(raw_rects, list) else []:
-            rect = _rect_tuple_from_value(raw_rect)
+            rect = rect_tuple_from_value(raw_rect)
             if rect is not None:
                 rects.append(rect)
         if rects:
@@ -560,7 +600,7 @@ def _bbox_candidates_from_manifest(value: object) -> BBoxTextStripCandidates | N
             continue
         rects: list[tuple[float, float, float, float]] = []
         for raw_rect in raw_rects if isinstance(raw_rects, list) else []:
-            rect = _rect_tuple_from_value(raw_rect)
+            rect = rect_tuple_from_value(raw_rect)
             if rect is not None:
                 rects.append(rect)
         if rects:
@@ -572,25 +612,9 @@ def _bbox_candidates_from_manifest(value: object) -> BBoxTextStripCandidates | N
         page_protected_rects=page_protected_rects,
         pages_skipped_complex=int(payload.get("pages_skipped_complex") or 0),
         pages_skipped_no_text_overlap=int(payload.get("pages_skipped_no_text_overlap") or 0),
-        skipped_complex_page_indices=frozenset(_int_list(payload.get("skipped_complex_page_indices"))),
-        skipped_no_text_overlap_page_indices=frozenset(_int_list(payload.get("skipped_no_text_overlap_page_indices"))),
+        skipped_complex_page_indices=frozenset(int_list(payload.get("skipped_complex_page_indices"))),
+        skipped_no_text_overlap_page_indices=frozenset(int_list(payload.get("skipped_no_text_overlap_page_indices"))),
     )
-
-
-def _rect_tuple_from_value(value: object) -> tuple[float, float, float, float] | None:
-    if not isinstance(value, list) or len(value) != 4:
-        return None
-    rect = tuple(_float_or_none(item) for item in value)
-    if any(item is None for item in rect):
-        return None
-    return (float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))  # type: ignore[arg-type]
-
-
-def _bbox_list_from_value(value: object) -> list[float] | None:
-    rect = _rect_tuple_from_value(value)
-    if rect is None:
-        return None
-    return [float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])]
 
 
 def _pages_for_prewarm_mode_probe(translated_pages: dict[int, list[dict]]) -> dict[int, list[dict]]:
@@ -618,51 +642,6 @@ def _pages_for_prewarm_mode_probe(translated_pages: dict[int, list[dict]]) -> di
     return probed
 
 
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=True)
-        f.write("\n")
-    tmp_path.replace(path)
-
-
-def _relative_to_manifest(manifest_path: Path, path: Path) -> str:
-    try:
-        return str(Path(path).resolve().relative_to(manifest_path.parent.resolve()))
-    except Exception:
-        return str(Path(path).resolve())
-
-
-def _resolve_manifest_path(manifest_path: Path, value: object) -> Path | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    path = Path(raw)
-    return path if path.is_absolute() else manifest_path.parent / path
-
-
-def _float_or_zero(value: object) -> float:
-    try:
-        return round(float(value), 3)
-    except Exception:
-        return 0.0
-
-
-def _float_or_none(value: object) -> float | None:
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _int_or_default(value: object, default: int) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return int(default)
-
-
 def _has_render_source_or_output_text(item: dict) -> bool:
     return bool(
         str(
@@ -676,20 +655,6 @@ def _has_render_source_or_output_text(item: dict) -> bool:
             or ""
         ).strip()
     )
-
-
-def _int_list(value: object) -> list[int]:
-    if not isinstance(value, list):
-        return []
-    result: list[int] = []
-    for item in value:
-        try:
-            result.append(int(item))
-        except Exception:
-            continue
-    return result
-
-
 __all__ = [
     "RenderPrewarmHandle",
     "RenderPrewarmSpec",

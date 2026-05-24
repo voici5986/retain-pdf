@@ -10,6 +10,7 @@ ALLOWED_UNTRANSLATED_REASONS = {
     "code",
     "keep_origin",
     "no_trans",
+    "short_non_body_label",
     "skip_interline_equation",
     "skip_display_formula",
     "skip_model_keep_origin",

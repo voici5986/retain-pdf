@@ -5,6 +5,7 @@ import {
   cachedEventsFor,
   cachedManifestFor,
   fetchAllJobEvents,
+  fetchRecentJobEvents,
   cachedStageActionsFor,
   JOB_EVENTS_REFRESH_MS,
   JOB_MANIFEST_REFRESH_MS,
@@ -37,8 +38,35 @@ export function mountJobRuntimeFeature({
   onReaderDialogSync,
   onReaderDialogClose,
 }) {
+  function latestJobPayloadFor(jobId, fallbackPayload) {
+    const snapshot = state.currentJobId === jobId ? state.currentJobSnapshot : null;
+    return snapshot || fallbackPayload;
+  }
+
+  function renderLatestJob(jobId, fallbackPayload, eventsPayload, manifestPayload, stageActionsPayload) {
+    renderJob(
+      latestJobPayloadFor(jobId, fallbackPayload),
+      eventsPayload,
+      manifestPayload,
+      stageActionsPayload,
+    );
+  }
+
   async function fetchJob(jobId) {
-    const payload = await fetchJobPayload(jobId, apiPrefix);
+    if (state.currentJobPollInFlight) {
+      return;
+    }
+    state.currentJobPollInFlight = true;
+    const generation = Number(state.currentJobPollGeneration || 0);
+    let payload;
+    try {
+      payload = await fetchJobPayload(jobId, apiPrefix);
+    } finally {
+      state.currentJobPollInFlight = false;
+    }
+    if (state.currentJobId !== jobId || generation !== Number(state.currentJobPollGeneration || 0)) {
+      return;
+    }
     const cachedEvents = cachedEventsFor(state, jobId);
     const cachedManifest = cachedManifestFor(state, jobId);
     const cachedStageActions = cachedStageActionsFor(state, jobId);
@@ -51,49 +79,71 @@ export function mountJobRuntimeFeature({
     if (isTerminalStatus(job.status)) {
       stopPolling(state);
     }
-    if (shouldRefreshSecondary(state.currentJobEventsFetchedAt, JOB_EVENTS_REFRESH_MS, terminal || !cachedEvents)) {
-      void fetchAllJobEvents({ fetchJobEvents, apiPrefix, jobId })
+    if (!state.currentJobEventsFetchInFlight && shouldRefreshSecondary(state.currentJobEventsFetchedAt, JOB_EVENTS_REFRESH_MS, terminal || !cachedEvents)) {
+      state.currentJobEventsFetchInFlight = true;
+      const eventsGeneration = generation;
+      const fetchEvents = terminal ? fetchAllJobEvents : fetchRecentJobEvents;
+      void fetchEvents({ fetchJobEvents, apiPrefix, jobId })
         .then((eventsPayload) => {
-          if (state.currentJobId !== jobId) {
+          if (state.currentJobId !== jobId || eventsGeneration !== Number(state.currentJobPollGeneration || 0)) {
             return;
           }
           state.currentJobEvents = eventsPayload;
           state.currentJobEventsJobId = jobId;
           state.currentJobEventsFetchedAt = Date.now();
-          renderJob(payload, eventsPayload, cachedManifestFor(state, jobId), cachedStageActionsFor(state, jobId));
+          renderLatestJob(jobId, payload, eventsPayload, cachedManifestFor(state, jobId), cachedStageActionsFor(state, jobId));
         })
         .catch(() => {
           // Event stream is secondary; keep main status usable even if events fail.
+        })
+        .finally(() => {
+          if (state.currentJobId === jobId) {
+            state.currentJobEventsFetchInFlight = false;
+          }
         });
     }
-    if (shouldRefreshSecondary(state.currentJobManifestFetchedAt, JOB_MANIFEST_REFRESH_MS, terminal || !cachedManifest)) {
+    if (!state.currentJobManifestFetchInFlight && shouldRefreshSecondary(state.currentJobManifestFetchedAt, JOB_MANIFEST_REFRESH_MS, terminal || !cachedManifest)) {
+      state.currentJobManifestFetchInFlight = true;
+      const manifestGeneration = generation;
       void fetchJobArtifactsManifest(jobId, apiPrefix)
         .then((manifestPayload) => {
-          if (state.currentJobId !== jobId) {
+          if (state.currentJobId !== jobId || manifestGeneration !== Number(state.currentJobPollGeneration || 0)) {
             return;
           }
           state.currentJobManifest = manifestPayload;
           state.currentJobManifestJobId = jobId;
           state.currentJobManifestFetchedAt = Date.now();
-          renderJob(payload, cachedEventsFor(state, jobId), manifestPayload, cachedStageActionsFor(state, jobId));
+          renderLatestJob(jobId, payload, cachedEventsFor(state, jobId), manifestPayload, cachedStageActionsFor(state, jobId));
         })
         .catch(() => {
           // Artifacts manifest is secondary; keep main status usable even if manifest fails.
+        })
+        .finally(() => {
+          if (state.currentJobId === jobId) {
+            state.currentJobManifestFetchInFlight = false;
+          }
         });
     }
-    if (fetchJobStageActions && shouldRefreshSecondary(state.currentJobStageActionsFetchedAt, JOB_STAGE_ACTIONS_REFRESH_MS, terminal || !cachedStageActions)) {
+    if (fetchJobStageActions && !state.currentJobStageActionsFetchInFlight && shouldRefreshSecondary(state.currentJobStageActionsFetchedAt, JOB_STAGE_ACTIONS_REFRESH_MS, terminal || !cachedStageActions)) {
+      state.currentJobStageActionsFetchInFlight = true;
+      const stageActionsGeneration = generation;
       void fetchJobStageActions(jobId, apiPrefix)
         .then((stageActionsPayload) => {
-          if (state.currentJobId !== jobId) {
+          if (state.currentJobId !== jobId || stageActionsGeneration !== Number(state.currentJobPollGeneration || 0)) {
             return;
           }
           state.currentJobStageActions = stageActionsPayload;
           state.currentJobStageActionsJobId = jobId;
           state.currentJobStageActionsFetchedAt = Date.now();
-          renderJob(payload, cachedEventsFor(state, jobId), cachedManifestFor(state, jobId), stageActionsPayload);
+          renderLatestJob(jobId, payload, cachedEventsFor(state, jobId), cachedManifestFor(state, jobId), stageActionsPayload);
         })
         .catch(() => {
           // Stage actions are secondary; keep main status usable even if action discovery fails.
+        })
+        .finally(() => {
+          if (state.currentJobId === jobId) {
+            state.currentJobStageActionsFetchInFlight = false;
+          }
         });
     }
   }
@@ -102,6 +152,7 @@ export function mountJobRuntimeFeature({
     stopPolling(state);
     state.currentJobId = jobId;
     resetJobSecondaryState(state);
+    state.currentJobPollGeneration = Number(state.currentJobPollGeneration || 0) + 1;
     if (!state.currentJobStartedAt) {
       state.currentJobStartedAt = new Date().toISOString();
     }

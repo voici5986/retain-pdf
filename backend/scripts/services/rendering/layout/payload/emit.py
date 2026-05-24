@@ -5,6 +5,7 @@ from services.rendering.layout.inline_content.core.markdown import build_plain_t
 from services.rendering.layout.inline_content.mode_router import build_item_render_markdown
 from services.rendering.layout.payload.metrics import resolve_typst_binary_fit
 from services.rendering.layout.payload.line_structure import preserved_line_boxes_for_item
+from services.rendering.layout.payload.toc_structure import render_toc_entries_for_item
 from services.rendering.policy import item_uses_white_overlay_fill
 
 
@@ -50,6 +51,7 @@ def payload_to_render_block(payload: dict) -> RenderBlock:
         fit_target_height_pt = 0.0
     preserve_line_breaks = bool(payload.get("preserve_line_breaks"))
     preserved_line_boxes = preserved_line_boxes_for_item(payload["item"], payload["translated_text"])
+    toc_entries = render_toc_entries_for_item(payload["item"], payload["translated_text"])
     return RenderBlock(
         block_id=f"item-{payload['index']}",
         bbox=payload["bbox"],
@@ -79,6 +81,7 @@ def payload_to_render_block(payload: dict) -> RenderBlock:
         source_item_id=str(payload["item"].get("item_id") or ""),
         preserve_line_breaks=preserve_line_breaks,
         preserved_line_boxes=preserved_line_boxes or None,
+        toc_entries=toc_entries or None,
     )
 
 

@@ -3,14 +3,10 @@ from __future__ import annotations
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Callable
 
 from services.translation.core.item_reader import item_block_kind
-from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL
-from services.translation.llm.shared.provider_runtime import DEFAULT_MODEL
-from services.translation.llm.shared.provider_runtime import get_api_key
-from services.translation.llm.shared.provider_runtime import normalize_base_url
-from services.translation.llm.shared.provider_runtime import request_chat_content
 from services.translation.llm.shared.structured_models import GARBLED_RECONSTRUCTION_RESPONSE_SCHEMA
 from services.translation.llm.shared.structured_parsers import parse_garbled_reconstruction_response
 from services.translation.artifacts.status import has_translation_artifact
@@ -25,26 +21,19 @@ ALL_CAP_DUP_RE = re.compile(r"\b([A-Z]{2,})(?=\s+\1\b)")
 LEADING_GLUE_RE = re.compile(r"\b([A-Z])([A-Z][a-z]{3,})\b")
 
 
-def _is_deepseek_provider(*, model: str, base_url: str) -> bool:
-    normalized_base = normalize_base_url(base_url).lower()
-    model_text = (model or "").strip().lower()
-    return "deepseek" in model_text or "deepseek.com" in normalized_base
+@dataclass(frozen=True)
+class GarbledReconstructionRuntime:
+    api_key: str
+    model: str
+    base_url: str
+    provider_reason: str
+    request_chat_content_fn: Callable[..., str]
+    normalize_base_url_fn: Callable[[str], str] | None = None
 
-
-def _resolve_reconstruction_provider(
-    *,
-    api_key: str,
-    model: str,
-    base_url: str,
-) -> tuple[str, str, str, str]:
-    if _is_deepseek_provider(model=model, base_url=base_url):
-        return api_key or get_api_key(required=False), model, base_url, "job_provider"
-
-    deepseek_key = get_api_key(required=False)
-    if deepseek_key:
-        return deepseek_key, DEFAULT_MODEL, DEFAULT_BASE_URL, "prefer_deepseek_api"
-
-    return api_key, model, base_url, "job_provider_fallback"
+    def display_base_url(self) -> str:
+        if self.normalize_base_url_fn is None:
+            return self.base_url
+        return self.normalize_base_url_fn(self.base_url)
 
 
 def _formula_map(item: dict) -> list[dict]:
@@ -162,7 +151,7 @@ def _build_formula_hints(item: dict) -> list[str]:
     return hints[:12]
 
 
-def _repair_item_translation(item: dict, *, api_key: str, model: str, base_url: str) -> str:
+def _repair_item_translation(item: dict, *, runtime: GarbledReconstructionRuntime) -> str:
     source_text = _source_text(item)
     formula_hints = _build_formula_hints(item)
     messages = [
@@ -191,11 +180,11 @@ def _repair_item_translation(item: dict, *, api_key: str, model: str, base_url: 
             ),
         },
     ]
-    content = request_chat_content(
+    content = runtime.request_chat_content_fn(
         messages,
-        api_key=api_key,
-        model=model,
-        base_url=base_url,
+        api_key=runtime.api_key,
+        model=runtime.model,
+        base_url=runtime.base_url,
         temperature=0.0,
         response_format=GARBLED_RECONSTRUCTION_RESPONSE_SCHEMA,
         timeout=120,
@@ -290,20 +279,16 @@ def _run_reconstruction_candidates(
     model: str,
     base_url: str,
     workers: int,
+    runtime: GarbledReconstructionRuntime,
     progress_callback: Callable[[int, int, set[int]], None] | None = None,
 ) -> tuple[int, set[int]]:
     reconstructed = 0
     dirty_pages: set[int] = set()
-    resolved_api_key, resolved_model, resolved_base_url, provider_reason = _resolve_reconstruction_provider(
-        api_key=api_key,
-        model=model,
-        base_url=base_url,
-    )
     max_workers = max(1, min(workers, 12, len(candidate_list)))
     print(f"book: garbled reconstruction candidates={len(candidate_list)} workers={max_workers}", flush=True)
     print(
-        f"book: garbled reconstruction provider={resolved_model} {normalize_base_url(resolved_base_url)}"
-        f" reason={provider_reason}",
+        f"book: garbled reconstruction provider={runtime.model} {runtime.display_base_url()}"
+        f" reason={runtime.provider_reason}",
         flush=True,
     )
 
@@ -312,9 +297,7 @@ def _run_reconstruction_candidates(
             try:
                 translated_text = _repair_item_translation(
                     item,
-                    api_key=resolved_api_key,
-                    model=resolved_model,
-                    base_url=resolved_base_url,
+                    runtime=runtime,
                 )
             except Exception as exc:
                 print(f"garbled-reconstruct {item.get('item_id', '')}: skipped: {type(exc).__name__}: {exc}", flush=True)
@@ -333,9 +316,7 @@ def _run_reconstruction_candidates(
             executor.submit(
                 _repair_item_translation,
                 item,
-                api_key=resolved_api_key,
-                model=resolved_model,
-                base_url=resolved_base_url,
+                runtime=runtime,
             ): (key, item)
             for key, item in candidate_list
         }
@@ -365,6 +346,7 @@ def reconstruct_garbled_items(
     model: str,
     base_url: str,
     workers: int,
+    runtime: GarbledReconstructionRuntime,
 ) -> dict[str, int]:
     candidates_by_key, representatives = _collect_candidates(payload)
     if not representatives:
@@ -378,6 +360,7 @@ def reconstruct_garbled_items(
         model=model,
         base_url=base_url,
         workers=workers,
+        runtime=runtime,
     )
     return {"garbled_candidates": len(candidate_list), "garbled_reconstructed": reconstructed}
 
@@ -389,6 +372,7 @@ def reconstruct_garbled_page_payloads(
     model: str,
     base_url: str,
     workers: int,
+    runtime: GarbledReconstructionRuntime,
     progress_callback: Callable[[int, int, set[int]], None] | None = None,
 ) -> dict[str, object]:
     flat_payload = [item for page_idx in sorted(page_payloads) for item in page_payloads[page_idx]]
@@ -408,6 +392,7 @@ def reconstruct_garbled_page_payloads(
         model=model,
         base_url=base_url,
         workers=workers,
+        runtime=runtime,
         progress_callback=progress_callback,
     )
     return {
@@ -420,5 +405,6 @@ def reconstruct_garbled_page_payloads(
 __all__ = [
     "reconstruct_garbled_items",
     "reconstruct_garbled_page_payloads",
+    "GarbledReconstructionRuntime",
     "should_reconstruct_garbled_item",
 ]

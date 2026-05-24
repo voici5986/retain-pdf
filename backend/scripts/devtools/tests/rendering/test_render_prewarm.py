@@ -14,6 +14,8 @@ from runtime.pipeline.render_plan import RenderPlan
 from runtime.pipeline.render_inputs import RenderInputs
 from foundation.config import layout
 from services.rendering.source.prewarm import RenderPrewarmSpec
+from services.rendering.source.prewarm import PAYLOAD_RENDER_ALGORITHM_VERSION
+from services.rendering.source.prewarm import build_render_prewarm_fingerprint
 from services.rendering.source.prewarm import prewarm_manifest_path_from_artifacts_dir
 from services.rendering.source.prewarm import start_render_source_prewarm
 from services.rendering.source.prewarm import try_load_render_payload_prewarm
@@ -352,6 +354,120 @@ def test_payload_prewarm_default_pikepdf_text_strip_exposes_bbox_candidates() ->
         assert payload_prewarm is not None
         assert payload_prewarm.bbox_text_strip_candidates is not None
         assert payload_prewarm.bbox_text_strip_candidates.page_rects
+
+
+def test_render_prewarm_fingerprint_tracks_payload_render_algorithm() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source_pdf = root / "source.pdf"
+        _source_pdf(source_pdf)
+
+        fingerprint = build_render_prewarm_fingerprint(
+            source_pdf_path=source_pdf,
+            translated_pages=_translated_page_payload(),
+            effective_render_mode="overlay",
+            start_page=0,
+            end_page=0,
+            pdf_compress_dpi=0,
+        )
+
+    assert fingerprint["payload_render_algorithm"] == PAYLOAD_RENDER_ALGORITHM_VERSION
+
+
+def test_payload_prewarm_exposes_background_render_page_specs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source_pdf = root / "source.pdf"
+        output_pdf = root / "rendered" / "out.pdf"
+        artifacts_dir = root / "artifacts"
+        output_pdf.parent.mkdir()
+        _source_pdf(source_pdf)
+
+        handle = start_render_source_prewarm(
+            RenderPrewarmSpec(
+                source_pdf_path=source_pdf,
+                output_pdf_path=output_pdf,
+                artifacts_dir=artifacts_dir,
+                translated_pages=_translated_page_payload(),
+                render_mode="typst_visual",
+                start_page=0,
+                end_page=0,
+                pdf_compress_dpi=0,
+            )
+        )
+        manifest_path = handle.wait()
+
+        payload_prewarm = try_load_render_payload_prewarm(
+            manifest_path=manifest_path,
+            source_pdf_path=source_pdf,
+            translated_pages=_translated_page_payload(),
+            effective_render_mode="typst_visual",
+            start_page=0,
+            end_page=0,
+            pdf_compress_dpi=0,
+        )
+
+        assert payload_prewarm is not None
+        assert payload_prewarm.background_render_page_specs is not None
+        assert len(payload_prewarm.background_render_page_specs) == 1
+        assert payload_prewarm.background_render_page_specs[0].blocks[0].plain_text
+
+
+def test_execute_typst_visual_uses_prewarmed_background_page_specs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source_pdf = root / "source.pdf"
+        output_pdf = root / "rendered" / "out.pdf"
+        artifacts_dir = root / "artifacts"
+        translations_dir = root / "translated"
+        output_pdf.parent.mkdir()
+        translations_dir.mkdir()
+        _source_pdf(source_pdf)
+
+        handle = start_render_source_prewarm(
+            RenderPrewarmSpec(
+                source_pdf_path=source_pdf,
+                output_pdf_path=output_pdf,
+                artifacts_dir=artifacts_dir,
+                translated_pages=_translated_page_payload(),
+                render_mode="typst_visual",
+                start_page=0,
+                end_page=0,
+                pdf_compress_dpi=0,
+            )
+        )
+        manifest_path = handle.wait()
+        render_plan = RenderPlan(
+            render_inputs=RenderInputs(
+                source_pdf_path=source_pdf,
+                translations_dir=translations_dir,
+                translation_manifest_path=None,
+            ),
+            selected_pages=_translated_page_payload(),
+            effective_render_mode="typst_visual",
+        )
+
+        def _fake_background(*, source_pdf_path, translated_pages, context, visual_only_background):
+            assert visual_only_background is True
+            assert context.background_render_page_specs is not None
+            assert context.background_render_page_specs[0].blocks[0].plain_text
+            return 1, {"route": "prewarmed-background-specs"}
+
+        with mock.patch(
+            "services.rendering.workflow.executor.run_background_typst_render",
+            side_effect=_fake_background,
+        ):
+            pages = execute_render_plan(
+                render_plan=render_plan,
+                output_pdf_path=output_pdf,
+                start_page=0,
+                end_page=0,
+                pdf_compress_dpi=0,
+                source_cleanup_strategy="pikepdf_text_strip",
+                render_prewarm_manifest_path=manifest_path,
+            )
+
+        assert pages == 1
 
 
 def test_redact_restore_formula_strategy_is_runtime_alias_for_pikepdf_text_strip() -> None:

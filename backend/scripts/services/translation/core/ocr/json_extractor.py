@@ -24,6 +24,7 @@ from services.translation.core.ocr.normalized_reader import (
     block_semantic_role as _block_semantic_role,
     block_sub_type as _block_sub_type,
     block_text_flow as _block_text_flow,
+    block_toc_entries as _block_toc_entries,
     raw_block_type as _raw_block_type,
     ensure_normalized_document,
     get_pages as _get_pages,
@@ -73,6 +74,7 @@ ROLE_CODE_CAPTION = "code_caption"
 ROLE_FOOTNOTE = "footnote"
 ROLE_IMAGE_FOOTNOTE = "image_footnote"
 ROLE_TABLE_FOOTNOTE = "table_footnote"
+ROLE_TABLE_OF_CONTENTS = "table_of_contents"
 PRIMARY_TRANSLATABLE_STRUCTURE_ROLES = {
     ROLE_BODY,
     ROLE_ABSTRACT,
@@ -87,6 +89,7 @@ PRIMARY_TRANSLATABLE_STRUCTURE_ROLES = {
     ROLE_OPTION_DESCRIPTION,
     ROLE_EXAMPLE_INTRO,
     ROLE_EXAMPLE_LINE,
+    ROLE_TABLE_OF_CONTENTS,
 }
 DERIVED_STRUCTURE_ROLE_MAP = {
     "title": ROLE_TITLE,
@@ -101,6 +104,7 @@ DERIVED_STRUCTURE_ROLE_MAP = {
     "table_footnote": ROLE_TABLE_FOOTNOTE,
     "abstract": ROLE_ABSTRACT,
     "reference_entry": ROLE_REFERENCE_ENTRY,
+    "table_of_contents": ROLE_TABLE_OF_CONTENTS,
 }
 _TRANSLATION_METADATA_BRIDGE_KEYS = {
     "continuation_hint",
@@ -443,8 +447,8 @@ def _is_translatable_page_item(item: TextItem) -> bool:
     return _get_structure_role(item) in PRIMARY_TRANSLATABLE_STRUCTURE_ROLES
 
 
-PRIMARY_TRANSLATABLE_SEMANTIC_ROLES = {"body", "abstract"}
-PRIMARY_TRANSLATABLE_STRUCTURE_HINTS = {"body"}
+PRIMARY_TRANSLATABLE_SEMANTIC_ROLES = {"body", "abstract", "table_of_contents"}
+PRIMARY_TRANSLATABLE_STRUCTURE_HINTS = {"body", "table_of_contents"}
 KEEP_ORIGIN_BLOCK_KINDS = {"formula"}
 KEEP_ORIGIN_SUB_TYPES = {"display_formula", "formula"}
 
@@ -468,6 +472,8 @@ def _is_primary_translatable_text_block(block: dict, data: dict) -> bool:
     semantic_role = _semantic_role(block)
     structure_role = _structure_role(block)
     if semantic_role == "abstract":
+        return True
+    if semantic_role == "table_of_contents" or structure_role == "table_of_contents":
         return True
     if semantic_role not in PRIMARY_TRANSLATABLE_SEMANTIC_ROLES:
         return False
@@ -541,6 +547,7 @@ def extract_block_item(
         lines=lines,
         line_texts=_block_line_texts(block),
         text_flow=_block_text_flow(block) or "flow",
+        toc_entries=_block_toc_entries(block),
         metadata={
             **_translation_metadata_bridge(block),
         },

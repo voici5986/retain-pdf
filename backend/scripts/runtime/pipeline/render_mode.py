@@ -5,16 +5,9 @@ import math
 
 import fitz
 
+from services.translation.workflow.page_range import resolve_page_range
 from services.rendering.source.document_ops import page_has_editable_text
 from services.rendering.source.document_ops import page_is_pseudo_editable_scan
-
-
-def resolve_page_range(total_pages: int, start_page: int, end_page: int) -> tuple[int, int]:
-    start = max(0, start_page)
-    stop = total_pages - 1 if end_page < 0 else min(end_page, total_pages - 1)
-    if start > stop:
-        raise RuntimeError(f"Invalid page range: start_page={start}, end_page={stop}")
-    return start, stop
 
 
 def is_editable_pdf(doc: fitz.Document, start_page: int, end_page: int) -> bool:
@@ -49,8 +42,8 @@ def resolve_effective_render_mode(
         return render_mode
 
     if not translated_pages_map:
-        print("auto render mode selected: typst (no translated pages map)")
-        return "typst"
+        print("auto render mode selected: overlay (no translated pages map)")
+        return "overlay"
 
     doc = fitz.open(source_pdf_path)
     try:
@@ -66,5 +59,5 @@ def resolve_effective_render_mode(
     finally:
         doc.close()
 
-    print("auto render mode selected: typst (background render route by default)")
-    return "typst"
+    print("auto render mode selected: overlay (editable PDF default route)")
+    return "overlay"

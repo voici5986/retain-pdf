@@ -39,7 +39,6 @@ from services.translation.llm.shared.provider_runtime import translate_continuat
 from services.translation.llm.shared.provider_runtime import translate_single_item_plain_text
 from services.translation.llm.shared.provider_runtime import translate_single_item_plain_text_unstructured
 from services.translation.llm.shared.provider_runtime import unwrap_translation_shell
-from services.translation.llm.shared.orchestration.common import is_continuation_or_group_unit
 
 
 def _sentence_level_fallback(
@@ -130,7 +129,11 @@ def translate_single_item_plain_text_with_retries(
     flow_deps = deps or _default_flow_deps()
     single_item_translator = flow_deps.single_item_translator_fn or translate_single_item_plain_text_with_retries
     route = select_single_item_route(item, context=context)
-    if is_continuation_or_group_unit(item) and flow_deps.translate_group_members_fn is not None:
+    if (
+        str(item.get("item_id", "") or "").startswith("__cg__:")
+        and str(item.get("translation_unit_id", "") or "").startswith("__cg__:")
+        and flow_deps.translate_group_members_fn is not None
+    ):
         try:
             group_result = flow_deps.translate_group_members_fn(
                 item,

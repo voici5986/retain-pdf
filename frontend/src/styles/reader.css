@@ -7,12 +7,12 @@
     border: none;
     border-radius: 0;
     padding: 0;
-    background: transparent;
+    background: #f3f4f6;
   }
 
   .reader-dialog::backdrop {
-    background: rgba(15, 23, 42, 0.34);
-    backdrop-filter: blur(6px);
+    background: #f3f4f6;
+    backdrop-filter: none;
   }
 
   .reader-dialog-shell {
@@ -102,6 +102,7 @@
     height: 100%;
     border: none;
     background: #f3f4f6;
+    color-scheme: light;
   }
 
   .reader-dialog-loading {

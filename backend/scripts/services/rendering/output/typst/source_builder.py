@@ -50,6 +50,6 @@ def build_typst_book_background_source(
         page_specs,
         work_dir=work_dir,
         font_family=font_family,
-        block_builder=lambda block_id, block: build_typst_block(block_id, block, include_fill=False),
+        block_builder=lambda block_id, block: build_typst_block(block_id, block, include_fill=True),
     )
     return "\n".join(lines) + "\n"

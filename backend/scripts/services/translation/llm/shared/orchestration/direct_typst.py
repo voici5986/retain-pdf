@@ -143,20 +143,6 @@ def translate_direct_typst_plain_text_with_retries(
                         f"{request_label}: direct_typst transport failure after {time.perf_counter() - started:.2f}s, mark failed: {type(exc).__name__}: {exc}",
                         flush=True,
                     )
-                if should_force_translate_body_text(item) and sentence_level_fallback_allowed(item):
-                    return sentence_level_fallback_or_terminal_failure(
-                        item,
-                        api_key=api_key,
-                        model=model,
-                        base_url=base_url,
-                        request_label=request_label,
-                        context=context,
-                        diagnostics=diagnostics,
-                        route_path=route_prefix + ["failed"],
-                        translate_plain=translate_plain,
-                        translate_unstructured=translate_unstructured,
-                        sentence_level_fallback_fn=sentence_level_fallback_fn,
-                    )
                 if allow_transport_tail_defer:
                     defer_transport_retry(
                         item,

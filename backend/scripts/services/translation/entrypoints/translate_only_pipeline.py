@@ -41,8 +41,7 @@ from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL
 from services.translation.llm.shared.provider_runtime import get_api_key
 from services.translation.llm.shared.provider_runtime import normalize_base_url
 from services.translation.services.terms import parse_glossary_json
-from services.translation.workflow import TranslationRequest
-from services.translation.workflow import translate_book
+from runtime.pipeline.translation_stage import translate_book_pipeline
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,44 +137,42 @@ def main() -> None:
             message="开始准备纯翻译阶段",
         )
         started = time.perf_counter()
-        result = translate_book(
-            TranslationRequest(
-                source_json_path=source_json_path,
-                output_dir=translations_dir,
-                api_key=api_key,
-                start_page=args.start_page,
-                end_page=args.end_page,
-                batch_size=args.batch_size,
-                workers=args.workers,
-                mode=args.mode,
-                math_mode=args.math_mode,
-                classify_batch_size=args.classify_batch_size,
-                skip_title_translation=args.skip_title_translation,
-                model=args.model,
-                base_url=args.base_url,
-                source_pdf_path=source_pdf_path,
-                rule_profile_name=args.rule_profile_name,
-                custom_rules_text=args.custom_rules_text,
-                glossary_id=args.glossary_id,
-                glossary_name=args.glossary_name,
-                glossary_resource_entry_count=args.glossary_resource_entry_count,
-                glossary_inline_entry_count=args.glossary_inline_entry_count,
-                glossary_overridden_entry_count=args.glossary_overridden_entry_count,
-                glossary_entries=parse_glossary_json(args.glossary_json),
-                context_mode=args.context_mode,
-                glossary_mode=args.glossary_mode,
-                memory_mode=args.memory_mode,
-                invocation=build_stage_invocation_metadata(
-                    stage="translate",
-                    stage_spec_schema_version=stage_spec_schema_version,
-                ),
-                render_prewarm_output_pdf_path=args.render_prewarm_output_pdf_path,
-                render_prewarm_artifacts_dir=args.render_prewarm_artifacts_dir,
-                render_prewarm_mode=args.render_prewarm_mode,
-                render_prewarm_pdf_compress_dpi=args.render_prewarm_pdf_compress_dpi,
-                render_prewarm_source_cleanup_strategy=args.render_prewarm_source_cleanup_strategy,
-            )
-        ).to_mapping()
+        result = translate_book_pipeline(
+            source_json_path=source_json_path,
+            output_dir=translations_dir,
+            api_key=api_key,
+            start_page=args.start_page,
+            end_page=args.end_page,
+            batch_size=args.batch_size,
+            workers=args.workers,
+            mode=args.mode,
+            math_mode=args.math_mode,
+            classify_batch_size=args.classify_batch_size,
+            skip_title_translation=args.skip_title_translation,
+            model=args.model,
+            base_url=args.base_url,
+            source_pdf_path=source_pdf_path,
+            rule_profile_name=args.rule_profile_name,
+            custom_rules_text=args.custom_rules_text,
+            glossary_id=args.glossary_id,
+            glossary_name=args.glossary_name,
+            glossary_resource_entry_count=args.glossary_resource_entry_count,
+            glossary_inline_entry_count=args.glossary_inline_entry_count,
+            glossary_overridden_entry_count=args.glossary_overridden_entry_count,
+            glossary_entries=parse_glossary_json(args.glossary_json),
+            context_mode=args.context_mode,
+            glossary_mode=args.glossary_mode,
+            memory_mode=args.memory_mode,
+            invocation=build_stage_invocation_metadata(
+                stage="translate",
+                stage_spec_schema_version=stage_spec_schema_version,
+            ),
+            render_prewarm_output_pdf_path=args.render_prewarm_output_pdf_path,
+            render_prewarm_artifacts_dir=args.render_prewarm_artifacts_dir,
+            render_prewarm_mode=args.render_prewarm_mode,
+            render_prewarm_pdf_compress_dpi=args.render_prewarm_pdf_compress_dpi,
+            render_prewarm_source_cleanup_strategy=args.render_prewarm_source_cleanup_strategy,
+        )
         elapsed = time.perf_counter() - started
         diagnostics_path = job_dirs.artifacts_dir / "translation_diagnostics.json"
         diagnostics_summary = write_translation_diagnostics(

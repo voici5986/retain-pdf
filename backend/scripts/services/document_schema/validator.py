@@ -61,6 +61,22 @@ def _validate_content(path: str, content: dict) -> None:
         _expect_type(f"{path}.asset_id", content["asset_id"], str)
         if not content["asset_id"]:
             _fail(f"{path}.asset_id", "expected non-empty string")
+    if "toc_entries" in content:
+        _expect_type(f"{path}.toc_entries", content["toc_entries"], list)
+        for index, entry in enumerate(content["toc_entries"]):
+            _expect_type(f"{path}.toc_entries[{index}]", entry, dict)
+            for key in ("title", "page_label"):
+                if key not in entry:
+                    _fail(f"{path}.toc_entries[{index}]", f"missing key '{key}'")
+                _expect_type(f"{path}.toc_entries[{index}].{key}", entry[key], str)
+            if "number" in entry:
+                _expect_type(f"{path}.toc_entries[{index}].number", entry["number"], str)
+            if "level" in entry:
+                _expect_type(f"{path}.toc_entries[{index}].level", entry["level"], int)
+            if "line_index" in entry:
+                _expect_type(f"{path}.toc_entries[{index}].line_index", entry["line_index"], int)
+            if "bbox" in entry:
+                _validate_bbox(f"{path}.toc_entries[{index}].bbox", entry["bbox"])
 
 
 def _validate_policy(path: str, policy: dict) -> None:
@@ -199,10 +215,10 @@ def _validate_block(path: str, block: dict, *, page_index: int) -> None:
     _validate_geometry(f"{path}.geometry", block["geometry"])
     _validate_content(f"{path}.content", block["content"])
     layout_role = _validate_role_string(f"{path}.layout_role", block["layout_role"])
-    if layout_role not in {"title", "heading", "paragraph", "list_item", "caption", "header", "footer", "footnote", "page_number", "unknown"}:
+    if layout_role not in {"title", "heading", "paragraph", "list_item", "caption", "header", "footer", "footnote", "page_number", "toc", "unknown"}:
         _fail(f"{path}.layout_role", f"unexpected layout role '{block['layout_role']}'")
     semantic_role = _validate_role_string(f"{path}.semantic_role", block["semantic_role"])
-    if semantic_role not in {"body", "abstract", "reference", "metadata", "affiliation", "acknowledgement", "unknown"}:
+    if semantic_role not in {"body", "abstract", "reference", "metadata", "affiliation", "acknowledgement", "table_of_contents", "unknown"}:
         _fail(f"{path}.semantic_role", f"unexpected semantic role '{block['semantic_role']}'")
     _validate_role_string(f"{path}.structure_role", block["structure_role"])
     _validate_policy(f"{path}.policy", block["policy"])

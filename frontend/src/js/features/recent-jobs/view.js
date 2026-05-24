@@ -32,40 +32,19 @@ export function setRecentJobsDialogOpen(open) {
   $("open-query-btn")?.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
-export function setRecentJobsDateInput(value) {
-  const component = recentJobsDialogComponent();
-  if (component?.setDateValue) {
-    component.setDateValue(value);
-    return;
-  }
-  const input = $("recent-jobs-date");
-  if (input instanceof HTMLInputElement) {
-    input.value = value || "";
-  }
-}
-
 export function bindRecentJobsEvents({
   onOpen,
-  onRefresh,
   onLoadMore,
-  onDateChange,
 } = {}) {
   $("open-query-btn")?.addEventListener("click", () => onOpen?.());
 
   const component = recentJobsDialogComponent();
   if (component?.bindEvents) {
-    component.bindEvents({ onRefresh, onLoadMore, onDateChange });
+    component.bindEvents({ onLoadMore });
     return;
   }
 
-  $("refresh-jobs-btn")?.addEventListener("click", () => onRefresh?.());
   $("load-more-jobs-btn")?.addEventListener("click", () => onLoadMore?.());
-  $("recent-jobs-date")?.addEventListener("change", (event) => {
-    const target = event.currentTarget;
-    if (target instanceof HTMLInputElement) {
-      onDateChange?.(target.value || "");
-    }
-  });
 }
 
 function summarizeInvocationCounts(items) {

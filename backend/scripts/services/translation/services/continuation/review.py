@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from typing import Callable
 
 from foundation.shared.prompt_loader import load_prompt
-from services.translation.llm.shared.provider_runtime import request_chat_content
 from services.translation.llm.shared.structured_models import CONTINUATION_REVIEW_RESPONSE_SCHEMA
 from services.translation.llm.shared.structured_parsers import parse_continuation_review_response
 
@@ -26,10 +26,11 @@ def review_candidate_pairs(
     model: str,
     base_url: str,
     request_label: str = "",
+    request_chat_content_fn: Callable[..., str],
 ) -> dict[str, str]:
     if not pairs:
         return {}
-    content = request_chat_content(
+    content = request_chat_content_fn(
         _build_messages(pairs),
         api_key=api_key,
         model=model,

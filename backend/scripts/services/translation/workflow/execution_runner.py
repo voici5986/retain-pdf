@@ -6,15 +6,18 @@ from services.translation.artifacts import aggregate_payload_diagnostics
 from services.translation.artifacts import translation_run_diagnostics_scope
 from services.translation.services.agents.review_artifact import build_translation_review
 from services.translation.core.payload import write_translation_manifest
-from services.rendering.source.prewarm import RenderPrewarmHandle
-from services.rendering.source.prewarm import RenderPrewarmSpec
-from services.rendering.source.prewarm import start_render_source_prewarm
 from services.translation.services.terms import summarize_glossary_usage
 from services.translation.workflow.translation_workflow import default_page_translation_name
 
 if TYPE_CHECKING:
     from services.translation.workflow.execution import TranslationExecutionRequest
     from services.translation.workflow.execution_plan import TranslationExecutionPlan
+
+
+def _wait_handle(handle: object | None) -> None:
+    wait = getattr(handle, "wait", None)
+    if callable(wait):
+        wait()
 
 
 def run_translation_execution_plan(
@@ -25,11 +28,23 @@ def run_translation_execution_plan(
     from services.translation.workflow.book_flow import translate_book_with_global_continuations
 
     glossary_entries = plan.glossary_entries
-    prewarm_handle: RenderPrewarmHandle | None = None
+    prewarm_handle: object | None = None
 
-    def _set_prewarm_handle(handle: RenderPrewarmHandle | None) -> None:
+    def _set_prewarm_handle(handle: object | None) -> None:
         nonlocal prewarm_handle
         prewarm_handle = handle
+
+    def _start_render_prewarm(page_payloads: dict[int, list[dict]]) -> object | None:
+        nonlocal prewarm_handle
+        if request.render_prewarm_start_fn is None:
+            return None
+        if prewarm_handle is not None:
+            _wait_handle(prewarm_handle)
+        return request.render_prewarm_start_fn(
+            {page_idx: [dict(item) for item in items] for page_idx, items in page_payloads.items()},
+            plan.start,
+            plan.stop,
+        )
 
     with translation_run_diagnostics_scope(plan.run_diagnostics):
         translated_pages_map, summaries = translate_book_with_global_continuations(
@@ -50,29 +65,11 @@ def run_translation_execution_plan(
             domain_guidance=plan.policy_config.domain_guidance,
             translation_context=plan.translation_context,
             run_diagnostics=plan.run_diagnostics,
-            render_prewarm_start_fn=(
-                lambda page_payloads: start_render_source_prewarm(
-                    RenderPrewarmSpec(
-                        source_pdf_path=request.source_pdf_path,
-                        output_pdf_path=request.render_prewarm_output_pdf_path,
-                        artifacts_dir=request.render_prewarm_artifacts_dir,
-                        translated_pages={page_idx: [dict(item) for item in items] for page_idx, items in page_payloads.items()},
-                        render_mode=request.render_prewarm_mode,
-                        start_page=plan.start,
-                        end_page=plan.stop,
-                        pdf_compress_dpi=request.render_prewarm_pdf_compress_dpi,
-                        source_cleanup_strategy=request.render_prewarm_source_cleanup_strategy,
-                    )
-                )
-                if request.source_pdf_path is not None
-                and request.render_prewarm_output_pdf_path is not None
-                and request.render_prewarm_artifacts_dir is not None
-                else None
-            ),
+            render_prewarm_start_fn=_start_render_prewarm,
             render_prewarm_handle_sink=lambda handle: _set_prewarm_handle(handle),
         )
     if prewarm_handle is not None:
-        prewarm_handle.wait()
+        _wait_handle(prewarm_handle)
     total_items = sum(item["total_items"] for item in summaries)
     translated_items = sum(item["translated_items"] for item in summaries)
     glossary_summary = summarize_glossary_usage(

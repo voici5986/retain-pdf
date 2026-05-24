@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from services.translation.core.item_reader import item_raw_block_type
+from services.translation.artifacts.status import is_allowed_untranslated
 from services.translation.llm.result_payload import KEEP_ORIGIN_LABEL
 from services.translation.llm.result_payload import is_internal_placeholder_degraded
 from services.translation.llm.result_payload import normalize_decision
@@ -135,6 +136,7 @@ def review_translation_item(
     translated_text = str(translated_result.get("translated_text", "") or "")
     decision = normalize_decision(translated_result.get("decision", "translate"))
     issues: list[TranslationQualityIssue] = []
+    diagnostics = dict(translated_result.get("translation_diagnostics") or {})
 
     if should_reject_keep_origin(item, decision, translated_result):
         issues.append(
@@ -145,6 +147,8 @@ def review_translation_item(
                 message="Long body text was kept as origin and should be reviewed",
             )
         )
+        return TranslationQualityReport(issues=issues, reviewed_item_count=1)
+    if is_allowed_untranslated(item, diagnostics):
         return TranslationQualityReport(issues=issues, reviewed_item_count=1)
     if decision == KEEP_ORIGIN_LABEL:
         return TranslationQualityReport(issues=issues, reviewed_item_count=1)

@@ -21,6 +21,11 @@ SHORT_BODY_INHERIT_CENTER_TOLERANCE_RATIO = 0.18
 BODY_CONTEXT_MIN_ANCHORS = 2
 
 
+def payload_is_continuation_member(payload: dict) -> bool:
+    item = payload.get("item") or {}
+    return bool(str(item.get("continuation_group") or item.get("continuation_group_id") or "").strip())
+
+
 def payload_density(payload: dict, *, font_size_pt: float | None = None, leading_em: float | None = None) -> float:
     inner_height = payload_density_height(payload)
     estimated_height = estimated_render_height_pt(
@@ -166,6 +171,8 @@ def same_body_column(payload: dict, anchor: dict, *, page_text_width_med: float)
 
 
 def is_body_context_text_payload(payload: dict) -> bool:
+    if payload_is_continuation_member(payload):
+        return False
     if payload["render_kind"] != "markdown":
         return False
     if payload.get("title_fit") is not None:

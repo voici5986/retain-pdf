@@ -1,3 +1,5 @@
+from typing import Callable
+
 from services.translation.services.classification.prompting import build_prompt
 from services.translation.services.classification.response_parser import parse_no_trans_response
 from services.translation.services.classification.rule_engine import rule_label
@@ -6,7 +8,6 @@ from services.translation.services.context import TranslationItemContext
 from services.translation.services.context import build_item_context
 from services.translation.services.context import build_page_item_contexts
 from services.translation.core.ocr.models import TextItem
-from services.translation.llm.shared.provider_runtime import DEFAULT_BASE_URL, DEFAULT_MODEL, request_chat_content
 
 
 def _candidate_text_item_context(item: TextItem, order: int) -> TranslationItemContext:
@@ -39,11 +40,12 @@ def _candidate_record(item: dict, order: int) -> dict:
 def classify_item_contexts(
     item_contexts: list[TranslationItemContext],
     api_key: str = "",
-    model: str = DEFAULT_MODEL,
-    base_url: str = DEFAULT_BASE_URL,
+    model: str = "",
+    base_url: str = "",
     batch_size: int = 12,
     rule_guidance: str = "",
     request_label: str = "",
+    request_chat_content_fn: Callable[..., str] | None = None,
 ) -> dict[str, str]:
     del batch_size
     page_items = [context.as_classification_record() for context in item_contexts]
@@ -55,9 +57,11 @@ def classify_item_contexts(
     review_items = [item for item in filtered if item["rule_label"] == "review"]
     labels = {item["item_id"]: item["rule_label"] for item in filtered if item["rule_label"] != "review"}
     if review_items:
+        if request_chat_content_fn is None:
+            raise ValueError("request_chat_content_fn is required when classification has review items")
         if request_label:
             print(f"{request_label}: review_items={len(review_items)} filtered={len(filtered)}", flush=True)
-        content = request_chat_content(
+        content = request_chat_content_fn(
             build_prompt(filtered, review_items, rule_guidance=rule_guidance),
             api_key=api_key,
             model=model,
@@ -74,11 +78,12 @@ def classify_item_contexts(
 def classify_payload_items(
     payload: list[dict],
     api_key: str = "",
-    model: str = DEFAULT_MODEL,
-    base_url: str = DEFAULT_BASE_URL,
+    model: str = "",
+    base_url: str = "",
     batch_size: int = 12,
     rule_guidance: str = "",
     request_label: str = "",
+    request_chat_content_fn: Callable[..., str] | None = None,
 ) -> dict[str, str]:
     return classify_item_contexts(
         build_page_item_contexts(payload),
@@ -88,17 +93,19 @@ def classify_payload_items(
         batch_size=batch_size,
         rule_guidance=rule_guidance,
         request_label=request_label,
+        request_chat_content_fn=request_chat_content_fn,
     )
 
 
 def classify_text_items(
     items: list[TextItem],
     api_key: str = "",
-    model: str = DEFAULT_MODEL,
-    base_url: str = DEFAULT_BASE_URL,
+    model: str = "",
+    base_url: str = "",
     batch_size: int = 12,
     rule_guidance: str = "",
     request_label: str = "",
+    request_chat_content_fn: Callable[..., str] | None = None,
 ) -> dict[str, str]:
     return classify_item_contexts(
         [_candidate_text_item_context(item, order) for order, item in enumerate(items, start=1)],
@@ -108,4 +115,5 @@ def classify_text_items(
         batch_size=batch_size,
         rule_guidance=rule_guidance,
         request_label=request_label,
+        request_chat_content_fn=request_chat_content_fn,
     )

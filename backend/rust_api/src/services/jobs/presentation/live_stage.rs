@@ -15,6 +15,7 @@ pub struct LiveStageSnapshot {
     pub stage_detail: Option<String>,
     pub progress_current: Option<i64>,
     pub progress_total: Option<i64>,
+    pub progress_unit: Option<String>,
 }
 
 pub fn load_live_stage_snapshot(job: &JobSnapshot, data_root: &Path) -> Option<LiveStageSnapshot> {
@@ -118,6 +119,15 @@ fn select_live_stage_snapshot(items: &[JobEventRecord]) -> Option<LiveStageSnaps
                 .then_with(|| left.ts.cmp(&right.ts))
                 .then_with(|| left.seq.cmp(&right.seq))
         })?;
+    let page_progress = items
+        .iter()
+        .filter(|item| {
+            item.progress_unit.as_deref().map(str::trim) == Some("page")
+                && (item.user_stage.as_deref().map(str::trim) == Some("render")
+                    || item.stage.as_deref().map(str::trim) == Some("rendering"))
+                && (item.progress_current.is_some() || item.progress_total.is_some())
+        })
+        .max_by(|left, right| left.ts.cmp(&right.ts).then_with(|| left.seq.cmp(&right.seq)));
     let fallback_progress = items
         .iter()
         .filter(|item| item.progress_current.is_some() || item.progress_total.is_some())
@@ -140,13 +150,31 @@ fn select_live_stage_snapshot(items: &[JobEventRecord]) -> Option<LiveStageSnaps
         } else {
             selected.stage_detail.clone()
         },
-        progress_current: selected
-            .progress_current
+        progress_current: display_progress_event(selected, page_progress)
+            .and_then(|item| item.progress_current)
             .or_else(|| fallback_progress.and_then(|item| item.progress_current)),
-        progress_total: selected
-            .progress_total
+        progress_total: display_progress_event(selected, page_progress)
+            .and_then(|item| item.progress_total)
             .or_else(|| fallback_progress.and_then(|item| item.progress_total)),
+        progress_unit: display_progress_event(selected, page_progress)
+            .and_then(|item| item.progress_unit.clone())
+            .or_else(|| fallback_progress.and_then(|item| item.progress_unit.clone())),
     })
+}
+
+fn display_progress_event<'a>(
+    selected: &'a JobEventRecord,
+    page_progress: Option<&'a JobEventRecord>,
+) -> Option<&'a JobEventRecord> {
+    if selected.progress_unit.as_deref().map(str::trim) == Some("page") {
+        return Some(selected);
+    }
+    let selected_stage = selected.stage.as_deref().map(str::trim).unwrap_or("");
+    let selected_user_stage = selected.user_stage.as_deref().map(str::trim).unwrap_or("");
+    if selected_user_stage == "render" || selected_stage == "rendering" {
+        return page_progress.or(Some(selected));
+    }
+    Some(selected)
 }
 
 fn user_stage_rank(stage: Option<&str>) -> i32 {

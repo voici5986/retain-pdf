@@ -53,6 +53,10 @@ _ACTIVE_RENDER_PAGE_PROGRESS: ContextVar[tuple[int, int] | None] = ContextVar(
     "active_render_page_progress",
     default=None,
 )
+_ACTIVE_PROGRESS_SNAPSHOT: ContextVar[dict[tuple[str, str, str], int] | None] = ContextVar(
+    "active_progress_snapshot",
+    default=None,
+)
 
 
 def _now_iso() -> str:
@@ -64,12 +68,19 @@ def user_stage_for_stage(stage: str) -> str:
     if stage in _OCR_STAGES:
         return "ocr"
     if stage in _TRANSLATE_STAGES:
-        return "translate"
+        return "translation"
     if stage in _RENDER_STAGES:
         return "render"
     if stage in {"finished", "done"}:
         return "done"
     return ""
+
+
+def normalize_user_stage(value: str) -> str:
+    normalized = str(value or "").strip()
+    if normalized == "translate":
+        return "translation"
+    return normalized
 
 
 def progress_unit_for_stage(stage: str, event_type: str, payload: dict[str, Any] | None) -> str:
@@ -87,6 +98,30 @@ def progress_unit_for_stage(stage: str, event_type: str, payload: dict[str, Any]
     if str(event_type or "").strip() == "stage_progress":
         return "step"
     return "none"
+
+
+def monotonic_progress_current(
+    *,
+    user_stage: str,
+    substage: str,
+    progress_unit: str,
+    progress_current: int | None,
+) -> int | None:
+    if progress_current is None:
+        return None
+    key = (
+        normalize_user_stage(user_stage),
+        str(substage or "").strip(),
+        str(progress_unit or "").strip(),
+    )
+    if not key[0] or not key[1] or key[2] in {"", "none"}:
+        return progress_current
+    snapshot = dict(_ACTIVE_PROGRESS_SNAPSHOT.get() or {})
+    previous = snapshot.get(key)
+    current = max(int(progress_current), int(previous)) if previous is not None else int(progress_current)
+    snapshot[key] = current
+    _ACTIVE_PROGRESS_SNAPSHOT.set(snapshot)
+    return current
 
 
 @dataclass
@@ -131,13 +166,21 @@ class PipelineEventWriter:
         self._seq += 1
         provider_value = (provider or self.provider).strip()
         payload_value = payload or {}
-        user_stage = str(payload_value.get("user_stage") or user_stage_for_stage(stage)).strip()
+        user_stage = normalize_user_stage(payload_value.get("user_stage") or user_stage_for_stage(stage))
         substage = str(payload_value.get("substage") or provider_stage or "").strip()
         progress_unit = progress_unit_for_stage(stage, event_type, payload_value)
+        ts = _now_iso()
+        progress_current = monotonic_progress_current(
+            user_stage=user_stage,
+            substage=substage or str(stage or "").strip(),
+            progress_unit=progress_unit,
+            progress_current=progress_current,
+        )
         record = {
             "job_id": self.job_id,
             "seq": self._seq,
-            "ts": _now_iso(),
+            "ts": ts,
+            "created_at": ts,
             "level": str(level or "info").strip() or "info",
             "user_stage": user_stage,
             "stage": str(stage or "").strip(),

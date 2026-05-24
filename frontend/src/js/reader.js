@@ -210,7 +210,6 @@ async function initializeReader() {
       apiPrefix: API_PREFIX,
       fetchTranslationItem,
     });
-    setPageIndicator(1, readerState.totalPages);
     scheduleScaleRefresh();
     applyReaderBootProgress(100, progressCopy.ready, "ready");
     setReaderBootLoading(false);

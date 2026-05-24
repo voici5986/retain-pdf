@@ -5,24 +5,14 @@ without pulling the full runtime pipeline during test/module import.
 """
 
 __all__ = [
-    "BookRequest",
-    "BookResult",
-    "TranslationRequest",
-    "TranslationResult",
     "TranslationExecutionRequest",
     "default_page_translation_name",
     "execute_translation_request",
-    "run_book",
-    "translate_book",
     "translate_items_to_path",
 ]
 
 
 def __getattr__(name: str):
-    if name in {"BookRequest", "BookResult", "TranslationRequest", "TranslationResult", "run_book", "translate_book"}:
-        from services.translation.workflow import book_facade
-
-        return getattr(book_facade, name)
     if name in {"TranslationExecutionRequest", "execute_translation_request"}:
         from services.translation.workflow import execution
 

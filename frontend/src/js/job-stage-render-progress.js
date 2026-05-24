@@ -1,3 +1,5 @@
+import { normalizeUserStage } from "./job-stage-presentation-utils.js";
+
 export function compositeRenderProgressFromEvents(
   job,
   eventsPayload,
@@ -12,7 +14,7 @@ export function compositeRenderProgressFromEvents(
   let latestPageProgress = null;
   let latestCompileProgress = null;
   for (const item of items) {
-    const itemStage = `${item?.stage || item?.provider_stage || item?.user_stage || item?.payload?.user_stage || ""}`.trim();
+    const itemStage = `${item?.stage || item?.provider_stage || normalizeUserStage(item?.user_stage || item?.payload?.user_stage) || ""}`.trim();
     if (!itemStage) {
       continue;
     }
@@ -41,14 +43,16 @@ export function compositeRenderProgressFromEvents(
     && latestCompileProgress.total > 0
   ) {
     const compileRatio = Math.max(0, Math.min(1, latestCompileProgress.current / latestCompileProgress.total));
+    const compileText = `编译 ${latestCompileProgress.current}/${latestCompileProgress.total}`;
     return {
       ...latestCompileProgress,
       current: 80 + Math.round(compileRatio * 20),
       total: 100,
       progressUnit: "percent",
-      progressText: latestCompileProgress.payload?.stage_detail || latestCompileProgress.progressText || `编译 ${latestCompileProgress.current}/${latestCompileProgress.total}`,
+      progressText: compileText,
       payload: {
         ...latestCompileProgress.payload,
+        stage_detail: compileText,
         progress_unit: "percent",
       },
       indeterminate: false,

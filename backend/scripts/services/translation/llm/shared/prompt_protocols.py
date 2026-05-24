@@ -45,7 +45,10 @@ def _append_context_lines(lines: list[str], item: TranslationItemContext) -> Non
 
 
 def _append_text_flow_guidance(lines: list[str], item: TranslationItemContext) -> None:
-    if item.text_flow != "preserve_lines" or not item.line_texts:
+    if item.toc_entries:
+        lines.append("结构提示：当前原文是目录页。逐行翻译目录标题；保留章节编号、点线省略号和页码，不要合并行，不要改动页码。")
+        return
+    if not item.preserve_line_structure_for_prompt or not item.line_texts:
         return
     lines.append("结构提示：当前原文是多行结构块；译文应尽量保持相同换行数量和行序，不要合并成普通段落。")
 

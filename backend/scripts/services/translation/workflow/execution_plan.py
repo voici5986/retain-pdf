@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from runtime.pipeline.render_mode import resolve_page_range
 from services.translation.artifacts import TranslationRunDiagnostics
 from services.translation.artifacts import classify_provider_family
 from services.translation.llm.shared.control_context import TranslationControlContext
@@ -16,6 +15,7 @@ from services.translation.services.terms import GlossaryEntry
 from services.translation.services.terms import normalize_glossary_entries
 from services.translation.workflow.workers import _adaptive_floor_limit
 from services.translation.workflow.workers import _adaptive_initial_limit
+from services.translation.workflow.page_range import resolve_page_range
 
 if TYPE_CHECKING:
     from services.translation.workflow.execution import TranslationExecutionRequest

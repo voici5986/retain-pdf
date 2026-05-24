@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 import time
 
 import fitz
@@ -16,134 +15,23 @@ from services.rendering.output.typst.overlay_book import prepare_overlay_doc_pag
 from services.rendering.output.typst.overlay_book import sanitize_overlay_page_specs
 from services.rendering.output.typst.overlay_compile import compile_book_overlay_pdf
 from services.rendering.output.typst.overlay_compile import compile_page_overlay_pdf
+from services.rendering.output.typst.overlay_color import apply_overlay_page_colors
 from services.rendering.output.typst.overlay_diagnostics import new_overlay_merge_diagnostics
-from services.rendering.output.typst.source_builder import build_typst_book_overlay_source
+from services.rendering.output.typst.overlay_runtime import can_use_pikepdf_book_overlay
+from services.rendering.output.typst.overlay_runtime import extract_failed_overlay_indices
+from services.rendering.output.typst.overlay_runtime import FAST_PATCH_PAGE_THRESHOLD
+from services.rendering.output.typst.overlay_runtime import overlay_pdf_size_mismatches
+from services.rendering.output.typst.overlay_source_cache import resolve_prebuilt_overlay_source
 from services.rendering.output.typst.source_page_overlay import apply_source_page_overlay
 from services.rendering.output.typst.source_page_overlay import mark_image_page_overlay_mode
 from services.rendering.output.typst.source_page_overlay import overlay_pages_from_single_pdf
-from services.pipeline_shared.events import emit_stage_progress
+from services.rendering.policy import apply_typst_cover_fallback_fields
 from services.pipeline_shared.events import emit_render_compile_progress
 from services.pipeline_shared.events import emit_render_page_progress
 
 
-_OVERLAY_STEM_RE = re.compile(r"\bbook-overlay-(\d{3,})\b")
-_OVERLAY_BLOCK_ID_RE = re.compile(r"\bp(\d+)_")
-_TYPST_PAGE_SIZE_RE = re.compile(
-    r"#set\s+page\(\s*width:\s*(?P<width>[0-9.]+)pt,\s*height:\s*(?P<height>[0-9.]+)pt",
-)
-_FAST_PATCH_PAGE_THRESHOLD = 120
-_PAGE_SIZE_TOLERANCE_PT = 0.5
-
-
-def _can_use_pikepdf_book_overlay(
-    *,
-    apply_source_overlay: bool,
-    use_typst_overlay_fill_only: bool,
-    source_cleanup_strategy: str,
-    source_text_precleaned_page_indices: frozenset[int],
-    ordered_page_indices: list[int],
-    translated_pages: dict[int, list[dict]],
-) -> bool:
-    if apply_source_overlay:
-        return False
-    if not ordered_page_indices:
-        return False
-    if use_typst_overlay_fill_only:
-        return True
-    if source_cleanup_strategy == "pikepdf_text_strip":
-        return True
-    return all(
-        page_idx in source_text_precleaned_page_indices or not translated_pages.get(page_idx)
-        for page_idx in ordered_page_indices
-    )
-
-
-def _extract_failed_overlay_indices(exc: BaseException, page_specs: list[tuple[int, float, float, list[dict], str]]) -> set[int]:
-    details = str(exc)
-    if isinstance(exc, TypstCompileError):
-        details = "\n".join(
-            part
-            for part in (
-                exc.stderr,
-                exc.stdout,
-                str(exc),
-            )
-            if part
-        )
-
-    candidates: set[int] = set()
-    for match in _OVERLAY_STEM_RE.finditer(details):
-        candidates.add(int(match.group(1)))
-    for match in _OVERLAY_BLOCK_ID_RE.finditer(details):
-        candidates.add(int(match.group(1)))
-
-    max_index = len(page_specs) - 1
-    return {index for index in candidates if 0 <= index <= max_index}
-
-
-def _prebuilt_source_matches_page_specs(
-    prebuilt_source_path: Path,
-    book_specs: list[tuple[float, float, list[dict]]],
-) -> bool:
-    try:
-        source = prebuilt_source_path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    sizes = [
-        (float(match.group("width")), float(match.group("height")))
-        for match in _TYPST_PAGE_SIZE_RE.finditer(source)
-    ]
-    if len(sizes) != len(book_specs):
-        return False
-    for (actual_w, actual_h), (expected_w, expected_h, _items) in zip(sizes, book_specs):
-        if abs(actual_w - float(expected_w)) > _PAGE_SIZE_TOLERANCE_PT:
-            return False
-        if abs(actual_h - float(expected_h)) > _PAGE_SIZE_TOLERANCE_PT:
-            return False
-    return True
-
-
-def _overlay_pdf_size_mismatches(
-    doc: fitz.Document,
-    ordered_page_indices: list[int],
-    overlay_pdf_path: Path,
-) -> list[dict[str, object]]:
-    mismatches: list[dict[str, object]] = []
-    overlay_doc = fitz.open(overlay_pdf_path)
-    try:
-        for overlay_page_idx, page_idx in enumerate(ordered_page_indices):
-            if overlay_page_idx >= len(overlay_doc):
-                mismatches.append(
-                    {
-                        "page_index": page_idx,
-                        "overlay_page_index": overlay_page_idx,
-                        "reason": "overlay_page_missing",
-                    }
-                )
-                continue
-            source_page = doc[page_idx]
-            overlay_page = overlay_doc[overlay_page_idx]
-            source_w = float(source_page.rect.width)
-            source_h = float(source_page.rect.height)
-            overlay_w = float(overlay_page.rect.width)
-            overlay_h = float(overlay_page.rect.height)
-            if (
-                abs(source_w - overlay_w) > _PAGE_SIZE_TOLERANCE_PT
-                or abs(source_h - overlay_h) > _PAGE_SIZE_TOLERANCE_PT
-            ):
-                mismatches.append(
-                    {
-                        "page_index": page_idx,
-                        "overlay_page_index": overlay_page_idx,
-                        "source_page_width_pt": round(source_w, 3),
-                        "source_page_height_pt": round(source_h, 3),
-                        "overlay_page_width_pt": round(overlay_w, 3),
-                        "overlay_page_height_pt": round(overlay_h, 3),
-                    }
-                )
-    finally:
-        overlay_doc.close()
-    return mismatches
+_can_use_pikepdf_book_overlay = can_use_pikepdf_book_overlay
+_extract_failed_overlay_indices = extract_failed_overlay_indices
 
 
 def overlay_translated_items_on_page(
@@ -209,6 +97,8 @@ def overlay_translated_pages_on_doc(
     source_text_precleaned_page_indices: frozenset[int] = frozenset(),
     prebuilt_source_path: Path | None = None,
     source_base_pdf_path: Path | None = None,
+    color_sample_pdf_path: Path | None = None,
+    precomputed_colors_by_item_id: dict[str, dict[str, tuple[float, float, float]]] | None = None,
     pikepdf_output_pdf_path: Path | None = None,
     source_cleanup_strategy: str = "typst_fill",
 ) -> dict[str, object]:
@@ -221,6 +111,18 @@ def overlay_translated_pages_on_doc(
         skip_policy_page_indices=source_text_precleaned_page_indices,
     )
     ordered_page_indices, translated_pages = prepare_overlay_doc_pages(doc, translated_pages)
+    cover_fallback_page_indices = frozenset(
+        page_idx
+        for page_idx in ordered_page_indices
+        if source_cleanup_strategy == "pikepdf_text_strip"
+        and page_idx not in source_text_precleaned_page_indices
+        and translated_pages.get(page_idx)
+    )
+    if cover_fallback_page_indices:
+        translated_pages = apply_typst_cover_fallback_fields(
+            translated_pages,
+            cover_fallback_page_indices,
+        )
     prepare_elapsed = time.perf_counter() - prepare_started
     if not ordered_page_indices:
         return {
@@ -241,46 +143,37 @@ def overlay_translated_pages_on_doc(
         }
 
     color_started = time.perf_counter()
-    translated_pages = {
-        page_idx: [
-            {
-                **item,
-                "_render_cover_fill": item.get("_render_cover_fill", (1, 1, 1)),
-                "_render_text_color": item.get("_render_text_color", (0, 0, 0)),
-            }
-            for item in translated_pages[page_idx]
-        ]
-        for page_idx in ordered_page_indices
-    }
+    if color_sample_pdf_path is not None:
+        sample_doc = fitz.open(color_sample_pdf_path)
+        try:
+            translated_pages = apply_overlay_page_colors(
+                sample_doc,
+                ordered_page_indices,
+                translated_pages,
+                precomputed_colors_by_item_id=precomputed_colors_by_item_id,
+            )
+        finally:
+            sample_doc.close()
+    else:
+        translated_pages = apply_overlay_page_colors(
+            doc,
+            ordered_page_indices,
+            translated_pages,
+            precomputed_colors_by_item_id=precomputed_colors_by_item_id,
+        )
     color_elapsed = time.perf_counter() - color_started
     specs_started = time.perf_counter()
     page_specs = build_overlay_page_specs(doc, ordered_page_indices, translated_pages, stem=stem)
     book_specs = [(page_width, page_height, items) for _, page_width, page_height, items, _ in page_specs]
     specs_elapsed = time.perf_counter() - specs_started
-    use_typst_overlay_fill_only = len(ordered_page_indices) >= _FAST_PATCH_PAGE_THRESHOLD
-    source_prepare_started = time.perf_counter()
-    active_prebuilt_source_path: Path | None = Path(prebuilt_source_path) if prebuilt_source_path is not None else None
-    if (
-        active_prebuilt_source_path is not None
-        and active_prebuilt_source_path.exists()
-        and _prebuilt_source_matches_page_specs(active_prebuilt_source_path, book_specs)
-    ):
-        print(f"typst book overlay source prewarm: hit {active_prebuilt_source_path}", flush=True)
-    elif temp_root is not None:
-        source_work_dir = temp_root / "book-overlay-sources"
-        source_work_dir.mkdir(parents=True, exist_ok=True)
-        active_prebuilt_source_path = source_work_dir / f"{stem}.typ.prebuilt"
-        active_prebuilt_source_path.write_text(
-            build_typst_book_overlay_source(
-                book_specs,
-                font_family=font_family,
-                include_cover_rect=False,
-            ),
-            encoding="utf-8",
-        )
-    else:
-        active_prebuilt_source_path = None
-    source_prepare_elapsed = time.perf_counter() - source_prepare_started
+    use_typst_overlay_fill_only = len(ordered_page_indices) >= FAST_PATCH_PAGE_THRESHOLD
+    active_prebuilt_source_path, source_prepare_elapsed = resolve_prebuilt_overlay_source(
+        prebuilt_source_path=prebuilt_source_path,
+        temp_root=temp_root,
+        stem=stem,
+        book_specs=book_specs,
+        font_family=font_family,
+    )
     compile_started = time.perf_counter()
     try:
         emit_render_compile_progress(
@@ -304,7 +197,7 @@ def overlay_translated_pages_on_doc(
             message=f"整本 Typst overlay 编译完成，共 {len(ordered_page_indices)} 页",
             payload={"render_stage": "typst_book_compile_done"},
         )
-        page_size_mismatches = _overlay_pdf_size_mismatches(doc, ordered_page_indices, overlay_pdf)
+        page_size_mismatches = overlay_pdf_size_mismatches(doc, ordered_page_indices, overlay_pdf)
         if page_size_mismatches:
             print(
                 f"typst book overlay page-size mismatch; using per-page fallback pages={len(page_size_mismatches)}",
@@ -338,6 +231,7 @@ def overlay_translated_pages_on_doc(
             diagnostics["payload_prepare_elapsed_seconds"] = prepare_elapsed
             diagnostics["color_adapt_elapsed_seconds"] = color_elapsed
             diagnostics["page_specs_elapsed_seconds"] = specs_elapsed
+            diagnostics["typst_cover_fallback_pages"] = sorted(cover_fallback_page_indices)
             diagnostics["typst_source_prepare_elapsed_seconds"] = source_prepare_elapsed
             diagnostics["typst_prebuilt_source_path"] = str(active_prebuilt_source_path or "")
             diagnostics["overlay_page_size_mismatches"] = page_size_mismatches
@@ -376,6 +270,7 @@ def overlay_translated_pages_on_doc(
             diagnostics["payload_prepare_elapsed_seconds"] = prepare_elapsed
             diagnostics["color_adapt_elapsed_seconds"] = color_elapsed
             diagnostics["page_specs_elapsed_seconds"] = specs_elapsed
+            diagnostics["typst_cover_fallback_pages"] = sorted(cover_fallback_page_indices)
             diagnostics["typst_source_prepare_elapsed_seconds"] = source_prepare_elapsed
             diagnostics["typst_prebuilt_source_path"] = str(active_prebuilt_source_path or "")
             diagnostics["pikepdf_overlay_output_pdf_path"] = str(pike_result.output_pdf_path)
@@ -406,6 +301,7 @@ def overlay_translated_pages_on_doc(
         diagnostics["payload_prepare_elapsed_seconds"] = prepare_elapsed
         diagnostics["color_adapt_elapsed_seconds"] = color_elapsed
         diagnostics["page_specs_elapsed_seconds"] = specs_elapsed
+        diagnostics["typst_cover_fallback_pages"] = sorted(cover_fallback_page_indices)
         diagnostics["typst_source_prepare_elapsed_seconds"] = source_prepare_elapsed
         diagnostics["typst_prebuilt_source_path"] = str(active_prebuilt_source_path or "")
         diagnostics.setdefault("compile_errors", [])
@@ -516,6 +412,7 @@ def overlay_translated_pages_on_doc(
                 diagnostics["payload_prepare_elapsed_seconds"] = prepare_elapsed
                 diagnostics["color_adapt_elapsed_seconds"] = color_elapsed
                 diagnostics["page_specs_elapsed_seconds"] = specs_elapsed
+                diagnostics["typst_cover_fallback_pages"] = sorted(cover_fallback_page_indices)
                 diagnostics["typst_source_prepare_elapsed_seconds"] = source_prepare_elapsed
                 diagnostics["typst_prebuilt_source_path"] = str(active_prebuilt_source_path or "")
                 diagnostics["compile_errors"] = compile_errors
@@ -547,6 +444,7 @@ def overlay_translated_pages_on_doc(
             diagnostics["payload_prepare_elapsed_seconds"] = prepare_elapsed
             diagnostics["color_adapt_elapsed_seconds"] = color_elapsed
             diagnostics["page_specs_elapsed_seconds"] = specs_elapsed
+            diagnostics["typst_cover_fallback_pages"] = sorted(cover_fallback_page_indices)
             diagnostics["typst_source_prepare_elapsed_seconds"] = source_prepare_elapsed
             diagnostics["typst_prebuilt_source_path"] = str(active_prebuilt_source_path or "")
             diagnostics["compile_errors"] = compile_errors

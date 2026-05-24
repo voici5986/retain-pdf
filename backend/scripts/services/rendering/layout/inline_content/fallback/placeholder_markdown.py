@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 
 from services.rendering.layout.inline_content.core.markdown import build_markdown_from_direct_text
-from services.rendering.layout.inline_content.core.markdown import looks_like_citation
-from services.rendering.layout.inline_content.core.markdown import normalize_plain_citation
 from services.rendering.layout.inline_content.fallback.latex_normalizer import normalize_formula_for_latex_math
 from services.translation.public import re_protect_restored_formulas
 
@@ -34,9 +32,6 @@ def build_markdown_from_parts(
     for part in parts:
         if part in formula_lookup:
             formula_text = formula_lookup.get(part, part)
-            if looks_like_citation(formula_text):
-                chunks.append(normalize_plain_citation(formula_text))
-                continue
             chunks.append(f"${normalize_formula_for_latex_math(formula_text)}$")
         else:
             text = "\n".join(

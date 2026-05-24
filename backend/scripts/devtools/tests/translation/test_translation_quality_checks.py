@@ -71,3 +71,53 @@ def test_quality_checks_collect_glossary_issues() -> None:
 
     glossary_issues = [issue for issue in report.issues if issue.kind == "glossary_term_missing"]
     assert [issue.details["source"] for issue in glossary_issues] == ["Hartree-Fock", "SCF"]
+
+
+def test_quality_allows_fast_path_short_non_body_empty_translation() -> None:
+    item = {
+        "item_id": "p004-b002",
+        "block_type": "text",
+        "block_kind": "text",
+        "layout_role": "caption",
+        "semantic_role": "metadata",
+        "raw_block_type": "figure_title",
+        "normalized_sub_type": "figure_caption",
+        "policy_translate": True,
+        "translation_unit_protected_source_text": "A",
+    }
+
+    report = review_translation_item(
+        item,
+        {
+            "decision": "keep_origin",
+            "translated_text": "",
+            "final_status": "kept_origin",
+            "translation_diagnostics": {
+                "route_path": ["block_level", "fast_path_keep_origin"],
+                "fallback_to": "keep_origin",
+                "degradation_reason": "short_non_body_label",
+                "final_status": "kept_origin",
+            },
+        },
+    )
+
+    assert not report.has_errors
+    assert report.issues == []
+
+
+def test_quality_still_blocks_body_empty_translation() -> None:
+    item = _body_item(
+        "p002-b005",
+        "To enhance ROS generation, various strategies have been developed to mitigate hypoxia.",
+    )
+
+    report = review_translation_item(
+        item,
+        {
+            "decision": "translate",
+            "translated_text": "",
+        },
+    )
+
+    assert report.has_errors
+    assert [issue.kind for issue in report.issues] == ["empty_translation"]
